@@ -1,5 +1,6 @@
 use anyhow::anyhow;
 use args::{parse_args, Literal};
+use row_type::{convert_row, RowType};
 use std::{collections::BTreeMap, path::Path};
 
 use clap::Clap;
@@ -8,6 +9,7 @@ mod args;
 mod decorator;
 mod module;
 mod parser;
+mod row_type;
 mod util;
 
 /// This doc string acts as a help message when the user runs '--help'
@@ -104,20 +106,21 @@ impl Main for Run {
                         let res: Vec<sqlx::postgres::PgRow> = query.fetch_all(&pool).await?;
 
                         for row in res {
-                            let res: BTreeMap<&str, String> = row
+                            let res: BTreeMap<&str, RowType> = row
                                 .columns()
                                 .iter()
                                 .map(|col| -> anyhow::Result<_> {
                                     let name = col.name();
-                                    let value: String =
-                                        row.try_get(col.ordinal()).map_err(|err| {
+                                    let value_ref =
+                                        row.try_get_raw(col.ordinal()).map_err(|err| {
                                             anyhow!(
                                                 "could not get column {} due to {}",
                                                 name,
                                                 err.to_string()
                                             )
                                         })?;
-                                    Ok((name, value))
+
+                                    Ok((name, convert_row(value_ref)?))
                                 })
                                 .collect::<anyhow::Result<BTreeMap<_, _>>>()?;
                             let json = serde_json::to_string_pretty(&res)?;

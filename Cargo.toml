@@ -18,4 +18,7 @@ regex = "1.4"
 clap = "3.0.0-beta.2"
 anyhow = "1.0"
 tokio = { version = "1.5.0", features=[ "rt"] }
-sqlx = { version = "0.5", features = [ "runtime-tokio-rustls", "postgres", "json", "chrono", "uuid" ] }
+sqlx = { version = "0.5", features = [ "runtime-tokio-rustls", "postgres", "json", "chrono", "uuid", "decimal" ] }
+chrono = { version = "0.4", features = ["serde"] }
+decimal = "2.1"
+uuid = { version = "0.8", features = ["v5", "v4", "serde"] }

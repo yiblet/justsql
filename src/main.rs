@@ -1,8 +1,14 @@
 use anyhow::anyhow;
+use args::{parse_args, Literal};
 use std::{collections::BTreeMap, path::Path};
 
 use clap::Clap;
+use sqlx::{Column, ColumnIndex, Row};
+mod args;
+mod decorator;
+mod module;
 mod parser;
+mod util;
 
 /// This doc string acts as a help message when the user runs '--help'
 /// as do all doc strings on fields
@@ -15,7 +21,7 @@ struct Opts {
 
 #[derive(Clap)]
 enum SubCommand {
-    Debug(Debug),
+    Run(Run),
 }
 
 trait Main {
@@ -24,21 +30,20 @@ trait Main {
 
 /// Show the sql to be executed without running it
 #[derive(Clap)]
-struct Debug {
+struct Run {
     /// location of the module file
     module: String,
 
     /// arguments to pass per module (in the form of arg_name=value)
     args: Vec<String>,
+
+    #[clap(long)]
+    debug: bool,
 }
 
-impl Main for Debug {
+impl Main for Run {
     fn main(&self, _opt: &Opts) -> anyhow::Result<()> {
-        let args = self
-            .args
-            .iter()
-            .map(|arg| parse_args(arg).ok_or_else(|| anyhow!("invalid arg {}", arg)))
-            .collect::<anyhow::Result<BTreeMap<&str, &str>>>()?;
+        let args = parse_args(self.args.iter().map(String::as_str))?;
 
         let module = read_module(&self.module)?;
         if args.len() != module.params.len()
@@ -50,44 +55,92 @@ impl Main for Debug {
             Err(anyhow!("some argument does not exist in the sql"))?;
         }
 
-        for statement in &module.sql {
-            println!("PREPARE query AS");
-            for lines in statement.split('\n').filter(|line| line.trim() != "") {
-                println!("    {}", lines);
-            }
-            println!(";");
-
-            print!("EXECUTE query(");
-            for (idx, arg) in module
-                .params
-                .iter()
-                .filter_map(|param| args.get(param.as_str()))
-                .enumerate()
-            {
-                if idx == 0 {
-                    print!("{}", arg)
-                } else {
-                    print!(", {}", arg)
+        if self.debug {
+            for statement in &module.sql {
+                println!("PREPARE query AS");
+                for lines in statement.split('\n').filter(|line| line.trim() != "") {
+                    println!("    {}", lines);
                 }
+                println!(";");
+
+                print!("EXECUTE query(");
+                for (idx, arg) in module
+                    .params
+                    .iter()
+                    .filter_map(|param| args.get(param.as_str()))
+                    .enumerate()
+                {
+                    if idx == 0 {
+                        print!("{}", arg.to_string())
+                    } else {
+                        print!(", {}", arg.to_string())
+                    }
+                }
+                println!(");");
             }
-            println!(");");
+        } else {
+            tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap()
+                .block_on(async {
+                    let uri = crate::util::get_var("POSTGRES_URL")?;
+                    let pool = sqlx::postgres::PgPoolOptions::new()
+                        .max_connections(1)
+                        .connect(uri.as_str())
+                        .await?;
+
+                    for statement in &module.sql {
+                        let mut query = sqlx::query(statement.as_str());
+
+                        for literal in module.bindings(&args) {
+                            query = match literal? {
+                                Literal::Int(i) => query.bind(i),
+                                Literal::Float(f) => query.bind(f),
+                                Literal::String(s) => query.bind(s),
+                            };
+                        }
+
+                        let res: Vec<sqlx::postgres::PgRow> = query.fetch_all(&pool).await?;
+
+                        for row in res {
+                            let res: BTreeMap<&str, String> = row
+                                .columns()
+                                .iter()
+                                .map(|col| -> anyhow::Result<_> {
+                                    let name = col.name();
+                                    let value: String =
+                                        row.try_get(col.ordinal()).map_err(|err| {
+                                            anyhow!(
+                                                "could not get column {} due to {}",
+                                                name,
+                                                err.to_string()
+                                            )
+                                        })?;
+                                    Ok((name, value))
+                                })
+                                .collect::<anyhow::Result<BTreeMap<_, _>>>()?;
+                            let json = serde_json::to_string_pretty(&res)?;
+                            println!("{}", json);
+                        }
+                    }
+
+                    let res: anyhow::Result<()> = Ok(());
+                    res
+                })?;
         }
+
         Ok(())
     }
 }
 
-fn parse_args(input: &str) -> Option<(&str, &str)> {
-    let (prefix, suffix) = input.split_at(input.find('=')?);
-    Some((prefix.trim(), &suffix[1..].trim()))
-}
-
-fn read_module<A: AsRef<Path>>(input: A) -> anyhow::Result<parser::Module> {
+fn read_module<A: AsRef<Path>>(input: A) -> anyhow::Result<module::Module> {
     use std::io::prelude::*;
     let path = input.as_ref();
     let mut file = std::fs::File::open(path)?;
     let mut file_content = String::with_capacity(file.metadata()?.len() as usize);
     file.read_to_string(&mut file_content)?;
-    let (_, data) = parser::Module::parse(file_content.as_str())
+    let (_, data) = module::Module::parse(file_content.as_str())
         .map_err(|err| anyhow!("{}", err.to_string()))?;
     Ok(data)
 }
@@ -96,6 +149,6 @@ pub fn main() -> anyhow::Result<()> {
     let opt: Opts = Opts::parse();
 
     match &opt.subcmd {
-        SubCommand::Debug(debug) => debug.main(&opt),
+        SubCommand::Run(runner) => runner.main(&opt),
     }
 }

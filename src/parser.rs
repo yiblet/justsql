@@ -1,12 +1,12 @@
 use nom::{
     branch::alt,
     bytes::complete::{is_not, tag, take, take_until, take_while},
-    combinator::{eof, opt},
-    multi::{fold_many0, many_till},
+    combinator::opt,
+    multi::fold_many0,
     sequence::{delimited, preceded, terminated},
     Err, IResult, Parser,
 };
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::fmt::Write;
 use thiserror::Error;
 
@@ -18,7 +18,7 @@ pub enum ParseError<'a> {
     ConstError(&'a str, &'static str),
 }
 
-fn const_error<'a>(input: &'a str, reason: &'static str) -> ParseError<'a> {
+pub fn const_error<'a>(input: &'a str, reason: &'static str) -> ParseError<'a> {
     ParseError::ConstError(input, reason)
 }
 
@@ -32,18 +32,18 @@ impl<'a> nom::error::ParseError<&'a str> for ParseError<'a> {
     }
 }
 
-type PResult<'a, O> = IResult<&'a str, O, ParseError<'a>>;
+pub type PResult<'a, O> = IResult<&'a str, O, ParseError<'a>>;
 
-fn space(input: &str) -> PResult<&str> {
+pub fn space(input: &str) -> PResult<&str> {
     opt(take_while(|chr: char| chr.is_whitespace()))(input)
         .map(|(input, val)| (input, val.unwrap_or("")))
 }
 
-fn dash_comment(input: &str) -> PResult<&str> {
+pub fn dash_comment(input: &str) -> PResult<&str> {
     preceded(tag("--"), is_not("\n"))(input)
 }
 
-fn slash_comment(input: &str) -> PResult<Vec<&str>> {
+pub fn slash_comment(input: &str) -> PResult<Vec<&str>> {
     let (input, _): (&str, _) = tag("/*")(input)?;
     let mut end_location = input
         .find("*/")
@@ -88,17 +88,6 @@ fn slash_comment(input: &str) -> PResult<Vec<&str>> {
     }
 }
 
-fn decorator<'a, A, P>(decorator: &'static str, parser: P) -> impl FnMut(&'a str) -> PResult<A>
-where
-    P: Parser<&'a str, A, ParseError<'a>>,
-{
-    delimited(
-        space.and(tag("@")).and(tag(decorator)).and(space),
-        parser,
-        opt(take_until("\n").and(take("\n".len()))),
-    )
-}
-
 // TODO add argtypes and validation
 #[allow(dead_code)]
 enum ArgType {
@@ -107,64 +96,6 @@ enum ArgType {
     String,
     Null,
     Union(Vec<ArgType>),
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-enum Decorator<'a> {
-    Endpoint(&'a str),
-    Param(&'a str),
-}
-
-impl<'a> Decorator<'a> {
-    fn parse_param(input: &'a str) -> PResult<&'a str> {
-        decorator("param", take_while(|chr: char| chr.is_alphanumeric()))(input)
-    }
-    fn parse_endpoint(input: &'a str) -> PResult<&'a str> {
-        decorator("endpoint", take_while(|chr: char| chr.is_alphanumeric()))(input)
-    }
-
-    pub fn parse(input: &'a str) -> PResult<Self> {
-        alt((
-            Self::parse_param.map(Decorator::Param),
-            Self::parse_endpoint.map(Decorator::Endpoint),
-        ))(input)
-    }
-}
-
-fn frontmatter<'a>(input: &'a str) -> PResult<Vec<Decorator<'a>>> {
-    enum Either<A> {
-        Many(Vec<A>),
-        One(A),
-    }
-
-    let (input, comments) = fold_many0(
-        delimited(
-            space,
-            alt((
-                dash_comment.map(Either::One),
-                slash_comment.map(Either::Many),
-            )),
-            space,
-        ),
-        vec![],
-        |mut acc, item: Either<&str>| match item {
-            Either::Many(item) => {
-                acc.extend(item.into_iter());
-                acc
-            }
-            Either::One(item) => {
-                acc.push(item);
-                acc
-            }
-        },
-    )(input)?;
-
-    let decorators: Vec<Decorator<'a>> = comments
-        .into_iter()
-        .filter_map(|comment| Some(Decorator::parse(comment).ok()?.1))
-        .collect();
-
-    Ok((input, decorators))
 }
 
 fn string_literal<'a>(input: &'a str) -> PResult<&'a str> {
@@ -212,9 +143,9 @@ pub fn normalize_sql<'a>(mut input: &'a str) -> PResult<(String, BTreeMap<&'a st
                 let arg_number = match map.get(key) {
                     Some(value) => *value,
                     None => {
-                        let position = map.len();
-                        map.insert(key, position);
-                        position
+                        let cur_arg_number = map.len() + 1;
+                        map.insert(key, cur_arg_number);
+                        cur_arg_number
                     }
                 };
                 write!(&mut res, "${}", arg_number)
@@ -238,77 +169,6 @@ pub fn normalize_sql<'a>(mut input: &'a str) -> PResult<(String, BTreeMap<&'a st
 
     res.shrink_to_fit();
     Ok((input, (res, map)))
-}
-
-// TODO set up "pre-interpolated" sql type
-#[derive(Debug, Clone)]
-pub struct Module {
-    pub endpoint: Option<String>,
-    pub params: Vec<String>,
-    pub sql: Vec<String>,
-}
-
-impl Module {
-    fn normalize_sql_and_verify_params<'a>(
-        input: &'a str,
-        params_set: &BTreeSet<&str>,
-    ) -> PResult<'a, String> {
-        let (input, (sql, map)) = normalize_sql(input)?;
-        if !map.keys().cloned().all(|val| params_set.contains(val)) {
-            return Err(Err::Failure(const_error(
-                input,
-                "some used params are not declared",
-            )));
-        }
-        Ok((input, sql))
-    }
-
-    pub fn parse(input: &str) -> PResult<Self> {
-        let (input, decorators) = frontmatter(input)?;
-
-        let mut endpoint = None;
-        let mut params = vec![];
-        let mut params_set = BTreeSet::new();
-
-        for decorator in decorators.iter() {
-            match *decorator {
-                Decorator::Param(param) if params_set.contains(param) => {
-                    Result::Err(Err::Failure(const_error(
-                        input,
-                        "multiple same parameters declarations detected",
-                    )))?
-                }
-                Decorator::Param(param) => {
-                    params.push(param.to_owned());
-                    params_set.insert(param);
-                }
-                Decorator::Endpoint(dec) => match endpoint {
-                    Some(_) => Result::Err(Err::Failure(const_error(
-                        input,
-                        "multiple endpoint declarations detected",
-                    )))?,
-                    None => {
-                        endpoint = Some(dec.to_owned());
-                    }
-                },
-            }
-        }
-
-        let (input, (statements, _)) = many_till(
-            |input| Self::normalize_sql_and_verify_params(input, &params_set),
-            eof,
-        )(input)?;
-
-        let module = Self {
-            endpoint,
-            sql: statements
-                .into_iter()
-                .filter(|stmt| stmt.as_str().trim() != "")
-                .collect(),
-            params: params.into_iter().map(String::from).collect(),
-        };
-        Ok((input, module))
-    }
 }
 
 #[cfg(test)]
@@ -360,32 +220,6 @@ mod tests {
     }
 
     #[test]
-    fn decorator_parse_test() {
-        let test_str = r#"@param shalom"#;
-        assert_eq!(Decorator::parse_param(test_str).unwrap().1, "shalom");
-
-        let test_str = "@endpoint getUsers \n\n";
-        assert_eq!(Decorator::parse_endpoint(test_str).unwrap().1, "getUsers");
-    }
-
-    #[test]
-    fn frontmatter_test() {
-        let test_str = r#"
-/* @endpoint getUser 
- * */
--- @param users
-select * from users;
-"#;
-        assert_eq!(
-            frontmatter(test_str).unwrap(),
-            (
-                "select * from users;\n",
-                vec![Decorator::Endpoint("getUser"), Decorator::Param("users")]
-            )
-        );
-    }
-
-    #[test]
     fn string_literal_test() {
         let test_str = r#""test" "#;
         assert_eq!(string_literal(test_str).unwrap(), (" ", r#""test""#));
@@ -399,60 +233,6 @@ select * from users;
         assert_eq!(
             normalized_sql,
             "select * from users where id = $0 and $1 = \'testing 123 @haha\' OR 0 = $0",
-        );
-    }
-
-    #[test]
-    fn module_parse_test() {
-        let test_str = r#"
--- @param email
--- @param id 
-select * from users 
-where id = @id 
-AND @email = 'testing 123 @haha' 
-OR 0 = @id"#;
-        let (_, module) = Module::parse(test_str).unwrap();
-        assert_eq!(format!("{:?}", &module), "Module { endpoint: None, params: [\"email\", \"id\"], sql: [\"select * from users \\nwhere id = $0 \\nAND $1 = \\\'testing 123 @haha\\\' \\nOR 0 = $0\"] }");
-
-        let test_str = r#"
-/* @param email 
- * 
- */
-select * from users 
-where id = @id 
-AND @email = 'testing 123 @haha' 
-OR 0 = @id"#;
-        let err = Module::parse(test_str).unwrap_err();
-        assert_eq!(
-            format!("{:?}", &err),
-            "Failure(ConstError(\"\", \"some used params are not declared\"))"
-        );
-
-        let test_str = r#"
-/* @param email 
- * @param id
- */
-select * from users 
-where id = @id 
-AND @email = 'testing 123 @haha' 
-OR 0 = @id;
-select * from users 
-where id = @id 
-AND @email = 'testing 123 @haha' 
-OR 0 = @id ;
-        "#;
-        let err = Module::parse(test_str).unwrap().0;
-        assert_eq!(err, "");
-
-        let test_str = r#"
-/* @param email 
- */
-@email;test;;;test;
-"#;
-        let statements = Module::parse(test_str).unwrap().1.sql;
-        assert_eq!(
-            statements,
-            vec!["$0".to_owned(), "test".to_owned(), "test".to_owned(),]
         );
     }
 }

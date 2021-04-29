@@ -6,7 +6,7 @@ use std::{
 use jsonwebtoken::{DecodingKey, EncodingKey};
 use serde::{Deserialize, Serialize};
 
-use crate::{binding::Binding, row_type::RowType, util::get_secret};
+use crate::{binding::Binding, util::get_secret};
 
 #[derive(Deserialize, Serialize)]
 pub struct AuthClaims<A> {

@@ -1,13 +1,10 @@
-use std::collections::BTreeMap;
-
 use anyhow::anyhow;
 use clap::Clap;
-use sqlx::{Column, Row};
 
 use crate::{
     args::{parse_args, Literal},
     read_module,
-    row_type::{convert_row, RowType},
+    row_type::convert_row,
 };
 
 use super::{Command, Opts};

@@ -1,14 +1,10 @@
 use anyhow::anyhow;
-use chrono::{DateTime, Local, NaiveDate, NaiveDateTime, NaiveTime, Utc};
+use chrono::{DateTime, NaiveDate, NaiveDateTime, NaiveTime, Utc};
 use serde::Serialize;
 use serde_json::Value;
-use sqlx::{
-    database::HasValueRef,
-    postgres::{PgTypeInfo, PgTypeKind, PgValueRef},
-    Decode, Postgres, Type, ValueRef,
-};
-use sqlx::{Column, ColumnIndex, Row, TypeInfo};
-use std::{borrow::Borrow, collections::BTreeMap, error::Error};
+use sqlx::{postgres::PgValueRef, Decode, Postgres, Type, ValueRef};
+use sqlx::{Column, Row, TypeInfo};
+use std::collections::BTreeMap;
 
 // bool	BOOL
 // i8	  CHAR
@@ -138,7 +134,8 @@ where
 }
 
 pub fn convert_row(row: sqlx::postgres::PgRow) -> anyhow::Result<BTreeMap<String, RowType>> {
-    let map = row.columns()
+    let map = row
+        .columns()
         .iter()
         .map(|col| -> anyhow::Result<_> {
             let name = col.name();
@@ -230,6 +227,7 @@ fn convert_value(value_ref: PgValueRef) -> anyhow::Result<RowType> {
     Ok(row_type)
 }
 
+#[allow(dead_code)]
 const ALL_TYPES: [&'static str; 92] = [
     "BIT",
     "BIT[]",

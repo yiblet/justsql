@@ -1,25 +1,22 @@
-use std::{
-    collections::BTreeMap,
-    time::{SystemTime, UNIX_EPOCH},
-};
+use std::collections::BTreeMap;
 
 use actix_web::{
-    cookie::Cookie, dev, middleware, web, App, HttpRequest, HttpResponse, HttpServer, Responder,
+    cookie::Cookie, middleware, web, App, HttpRequest, HttpResponse, HttpServer, Responder,
 };
 use anyhow::anyhow;
 use clap::Clap;
-use futures::future::{err, ok, Ready};
+
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Number, Value};
-use sqlx::{postgres::PgArguments, PgPool, Postgres};
+use serde_json::{json, Value};
+use sqlx::PgPool;
 
 use crate::{
-    binding::{bindings_from_json, Binding},
+    binding::bindings_from_json,
     module::{AuthSettings, Module},
     query::build_query,
     read_module,
     row_type::{convert_row, RowType},
-    util::{get_cookie_domain, get_cookie_http_only, get_cookie_secure, get_secret},
+    util::{get_cookie_domain, get_cookie_http_only, get_cookie_secure},
 };
 
 use super::{Command, Opts};
@@ -119,7 +116,7 @@ async fn auth_query(
 
             let res: ReturnType = match auth {
                 AuthSettings::RemoveToken => {
-                    let res = query.execute(&mut tx).await?;
+                    query.execute(&mut tx).await?;
                     ReturnType::RemoveToken
                 }
 

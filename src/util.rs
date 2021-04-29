@@ -1,5 +1,4 @@
 use anyhow::anyhow;
-use jsonwebtoken::{DecodingKey, EncodingKey};
 
 pub fn get_var(input: &str) -> anyhow::Result<String> {
     std::env::var(input).map_err(|_| anyhow!("must pass env variable {}", input))
@@ -7,7 +6,7 @@ pub fn get_var(input: &str) -> anyhow::Result<String> {
 
 // TODO explain required environment variables
 pub fn get_secret() -> anyhow::Result<String> {
-    let mut secret = get_var("AUTH_SECRET")?;
+    let secret = get_var("AUTH_SECRET")?;
     let key = secret.trim().to_owned();
     Ok(key)
 }

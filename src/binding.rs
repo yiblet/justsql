@@ -50,23 +50,4 @@ impl Binding {
 
         Ok(val)
     }
-
-    fn bind<'a, 'b: 'a>(
-        &'b self,
-        query: sqlx::query::Query<'a, sqlx::Postgres, sqlx::postgres::PgArguments>,
-    ) -> sqlx::query::Query<'a, sqlx::Postgres, sqlx::postgres::PgArguments> {
-        match self {
-            Self::Int(val) => query.bind(val),
-            Self::Bool(val) => query.bind(val),
-            Self::Float(val) => query.bind(val),
-            Self::String(val) => query.bind(val),
-            Self::Null => {
-                // TODO check if this doesn't cause some kind of type error
-                // if the null type is the wrong null
-                let null: Option<String> = None;
-                query.bind(null)
-            }
-            Self::Json(val) => query.bind(val),
-        }
-    }
 }

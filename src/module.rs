@@ -1,5 +1,4 @@
 use crate::{
-    binding::Binding,
     decorator::Decorator,
     parser::{const_error, normalize_sql, PResult},
     server::auth::decode,
@@ -45,7 +44,7 @@ impl Module {
 
     pub fn verify(&self, cookie: Option<&str>) -> anyhow::Result<()> {
         if matches!(self.auth, Some(AuthSettings::VerifyToken(_))) {
-            return decode(cookie.ok_or_else(|| anyhow!("missing cookie"))?).map(|v| ());
+            return decode(cookie.ok_or_else(|| anyhow!("missing cookie"))?).map(|_| ());
         }
         Ok(())
     }

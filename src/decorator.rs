@@ -1,6 +1,6 @@
 use nom::{
     branch::alt,
-    bytes::complete::{is_a, tag, take, take_until, take_while},
+    bytes::complete::{tag, take, take_until, take_while},
     character::complete::one_of,
     combinator::opt,
     multi::fold_many0,
@@ -8,8 +8,6 @@ use nom::{
     sequence::{delimited, preceded},
     Parser,
 };
-
-use anyhow::anyhow;
 
 use crate::{
     module::AuthSettings,

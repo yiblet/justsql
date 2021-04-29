@@ -1,6 +1,8 @@
 use crate::{
-    decorator::Decorator,
-    parser::{const_error, normalize_sql, PResult},
+    ast::{
+        decorator::Decorator,
+        parser::{const_error, normalize_sql, PResult},
+    },
     server::auth::decode,
 };
 use anyhow::anyhow;
@@ -8,6 +10,7 @@ use nom::{combinator::eof, multi::many_till, Err};
 use std::{
     borrow::Borrow,
     collections::{BTreeMap, BTreeSet},
+    path::Path,
 };
 
 // TODO set up "pre-interpolated" sql type
@@ -63,8 +66,19 @@ impl Module {
         })
     }
 
+    pub fn from_path<A: AsRef<Path>>(input: A) -> anyhow::Result<Module> {
+        use std::io::prelude::*;
+        let path = input.as_ref();
+        let mut file = std::fs::File::open(path)?;
+        let mut file_content = String::with_capacity(file.metadata()?.len() as usize);
+        file.read_to_string(&mut file_content)?;
+        let (_, data) =
+            Module::parse(file_content.as_str()).map_err(|err| anyhow!("{}", err.to_string()))?;
+        Ok(data)
+    }
+
     pub fn parse(input: &str) -> PResult<Self> {
-        let (input, decorators) = crate::decorator::frontmatter(input)?;
+        let (input, decorators) = crate::ast::decorator::frontmatter(input)?;
 
         let mut endpoint = None;
         let mut params = vec![];

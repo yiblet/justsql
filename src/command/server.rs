@@ -11,10 +11,9 @@ use serde_json::{json, Value};
 use sqlx::PgPool;
 
 use crate::{
+    ast::{AuthSettings, Module},
     binding::bindings_from_json,
-    module::{AuthSettings, Module},
     query::build_query,
-    read_module,
     row_type::{convert_row, RowType},
     util::{get_cookie_domain, get_cookie_http_only, get_cookie_secure},
 };
@@ -275,7 +274,7 @@ pub async fn run_server(cmd: Server) -> anyhow::Result<()> {
     let modules: BTreeMap<String, Module> = glob::glob(cmd.glob.as_str())?
         .filter_map(|file| {
             file.map_err(|err| err.into())
-                .and_then(read_module)
+                .and_then(Module::from_path)
                 .map(|val| Some((val.endpoint.as_ref()?.clone(), val)))
                 .transpose()
         })

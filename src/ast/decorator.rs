@@ -10,8 +10,8 @@ use nom::{
 };
 
 use crate::{
-    module::AuthSettings,
-    parser::{const_error, dash_comment, slash_comment, space, PResult, ParseError},
+    ast::module::AuthSettings,
+    ast::parser::{const_error, dash_comment, slash_comment, space, PResult, ParseError},
 };
 
 #[derive(Debug, Clone, PartialEq)]

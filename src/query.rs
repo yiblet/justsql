@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 
 use sqlx::{postgres::PgArguments, Postgres};
 
-use crate::{binding::Binding, module::Module};
+use crate::{binding::Binding, ast::Module};
 
 pub fn build_query<'a>(
     statement: &'a str,

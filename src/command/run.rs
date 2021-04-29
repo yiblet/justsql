@@ -3,7 +3,7 @@ use clap::Clap;
 
 use crate::{
     args::{parse_args, Literal},
-    read_module,
+    ast::Module,
     row_type::convert_row,
 };
 
@@ -27,7 +27,7 @@ impl Command for Run {
     fn run_command(&self, _opt: &Opts) -> anyhow::Result<()> {
         let args = parse_args(self.args.iter().map(String::as_str))?;
 
-        let module = read_module(&self.module)?;
+        let module = Module::from_path(&self.module)?;
         if args.len() != module.params.len()
             || !module
                 .params

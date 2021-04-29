@@ -232,7 +232,7 @@ mod tests {
         let (_, (normalized_sql, _)) = normalize_sql(test_str).unwrap();
         assert_eq!(
             normalized_sql,
-            "select * from users where id = $0 and $1 = \'testing 123 @haha\' OR 0 = $0",
+            "select * from users where id = $1 and $2 = \'testing 123 @haha\' OR 0 = $1",
         );
     }
 }

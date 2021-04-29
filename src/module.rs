@@ -1,5 +1,4 @@
 use crate::{
-    args::{Args, Literal},
     decorator::Decorator,
     parser::{const_error, normalize_sql, PResult},
 };
@@ -109,7 +108,7 @@ where id = @id
 AND @email = 'testing 123 @haha' 
 OR 0 = @id"#;
         let (_, module) = Module::parse(test_str).unwrap();
-        assert_eq!(format!("{:?}", &module), "Module { endpoint: None, params: [\"email\", \"id\"], sql: [\"select * from users \\nwhere id = $0 \\nAND $1 = \\\'testing 123 @haha\\\' \\nOR 0 = $0\"] }");
+        assert_eq!(format!("{:?}", &module), "Module { endpoint: None, params: [\"email\", \"id\"], sql: [\"select * from users \\nwhere id = $1 \\nAND $2 = \\\'testing 123 @haha\\\' \\nOR 0 = $1\"] }");
 
         let test_str = r#"
 /* @param email 
@@ -149,7 +148,7 @@ OR 0 = @id ;
         let statements = Module::parse(test_str).unwrap().1.sql;
         assert_eq!(
             statements,
-            vec!["$0".to_owned(), "test".to_owned(), "test".to_owned(),]
+            vec!["$1".to_owned(), "test".to_owned(), "test".to_owned(),]
         );
     }
 }

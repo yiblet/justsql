@@ -171,5 +171,16 @@ select * from users;
                 vec![Decorator::Endpoint("getUser"), Decorator::Param("users")]
             )
         );
+
+        let test_str = r#"
+-- testing 
+--
+-- @param users
+select * from users;
+"#;
+        assert_eq!(
+            frontmatter(test_str).unwrap(),
+            ("select * from users;\n", vec![Decorator::Param("users")])
+        );
     }
 }

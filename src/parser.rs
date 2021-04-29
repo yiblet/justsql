@@ -40,7 +40,9 @@ pub fn space(input: &str) -> PResult<&str> {
 }
 
 pub fn dash_comment(input: &str) -> PResult<&str> {
-    preceded(tag("--"), is_not("\n"))(input)
+    preceded(tag("--"), opt(is_not("\n")))
+        .map(|val| val.unwrap_or(""))
+        .parse(input)
 }
 
 pub fn slash_comment(input: &str) -> PResult<Vec<&str>> {

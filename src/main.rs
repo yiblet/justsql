@@ -11,6 +11,7 @@ mod parser;
 mod query;
 mod row_type;
 mod util;
+mod server;
 
 fn read_module<A: AsRef<Path>>(input: A) -> anyhow::Result<module::Module> {
     use std::io::prelude::*;

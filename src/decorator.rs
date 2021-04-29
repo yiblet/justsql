@@ -1,32 +1,81 @@
 use nom::{
     branch::alt,
-    bytes::complete::{tag, take, take_until, take_while},
+    bytes::complete::{is_a, tag, take, take_until, take_while},
+    character::complete::one_of,
     combinator::opt,
     multi::fold_many0,
-    sequence::delimited,
+    number::complete::float,
+    sequence::{delimited, preceded},
     Parser,
 };
 
-use crate::parser::{dash_comment, slash_comment, space, PResult, ParseError};
+use anyhow::anyhow;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+use crate::{
+    module::AuthSettings,
+    parser::{const_error, dash_comment, slash_comment, space, PResult, ParseError},
+};
+
+#[derive(Debug, Clone, PartialEq)]
 pub enum Decorator<'a> {
     Endpoint(&'a str),
     Param(&'a str),
+    Auth(AuthSettings),
+}
+
+fn get_multiplier(chr: char) -> Result<f32, &'static str> {
+    let res = match chr {
+        's' => 1f32,
+        'm' => 60f32,
+        'h' => 60f32 * 60f32,
+        'd' => 60f32 * 60f32 * 24f32,
+        'M' => 60f32 * 60f32 * 24f32 * 30f32,
+        'y' => 60f32 * 60f32 * 24f32 * 365f32,
+        _ => Err("invalid time multiplier")?,
+    };
+    Ok(res)
+}
+
+fn parse_interval(input: &str) -> PResult<f32> {
+    let (output, (seconds, chr_opt)) = float.and(opt(one_of("smhdMy"))).parse(input)?;
+    let seconds = match chr_opt {
+        None => seconds,
+        Some(chr) => {
+            seconds
+                * get_multiplier(chr).map_err(|err| nom::Err::Failure(const_error(input, err)))?
+        }
+    };
+    Ok((output, seconds))
 }
 
 impl<'a> Decorator<'a> {
     fn parse_param(input: &'a str) -> PResult<&'a str> {
         decorator("param", take_while(|chr: char| chr.is_alphanumeric()))(input)
     }
+
     fn parse_endpoint(input: &'a str) -> PResult<&'a str> {
         decorator("endpoint", take_while(|chr: char| chr.is_alphanumeric()))(input)
+    }
+
+    fn parse_auth(input: &'a str) -> PResult<AuthSettings> {
+        let verify_token = preceded(tag("verify").and(space), opt(parse_interval))
+            .map(|opt| opt.map(|val| val as u64))
+            .map(AuthSettings::VerifyToken);
+
+        let set_token = preceded(tag("authorize").and(space), parse_interval)
+            .map(|val| val as u64)
+            .map(AuthSettings::SetToken);
+
+        let remove_token = tag("clear").map(|_| AuthSettings::RemoveToken);
+
+        decorator("auth", alt((verify_token, set_token, remove_token)))(input)
     }
 
     pub fn parse(input: &'a str) -> PResult<Self> {
         alt((
             Self::parse_param.map(Decorator::Param),
             Self::parse_endpoint.map(Decorator::Endpoint),
+            Self::parse_auth.map(Decorator::Auth),
         ))(input)
     }
 }
@@ -89,6 +138,24 @@ mod tests {
 
         let test_str = "@endpoint getUsers \n\n";
         assert_eq!(Decorator::parse_endpoint(test_str).unwrap().1, "getUsers");
+
+        let test_str = "@auth verify \n\n";
+        assert_eq!(
+            Decorator::parse_auth(test_str).unwrap().1,
+            AuthSettings::VerifyToken(None)
+        );
+
+        let test_str = "@auth verify 2d \n\n";
+        assert_eq!(
+            Decorator::parse_auth(test_str).unwrap().1,
+            AuthSettings::VerifyToken(Some(60 * 60 * 24 * 2))
+        );
+
+        let test_str = "@auth authorize 32d \n\n";
+        assert_eq!(
+            Decorator::parse_auth(test_str).unwrap().1,
+            AuthSettings::SetToken(60 * 60 * 24 * 32)
+        );
     }
 
     #[test]

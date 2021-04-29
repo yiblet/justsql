@@ -1,6 +1,8 @@
 use crate::{
+    binding::Binding,
     decorator::Decorator,
     parser::{const_error, normalize_sql, PResult},
+    server::auth::decode,
 };
 use anyhow::anyhow;
 use nom::{combinator::eof, multi::many_till, Err};
@@ -10,8 +12,17 @@ use std::{
 };
 
 // TODO set up "pre-interpolated" sql type
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
+pub enum AuthSettings {
+    VerifyToken(Option<u64>),
+    SetToken(u64), // number of seconds till expiration
+    RemoveToken,
+}
+
+// TODO set up "pre-interpolated" sql type
+#[derive(Debug, Clone, Default)]
 pub struct Module {
+    pub auth: Option<AuthSettings>,
     pub endpoint: Option<String>,
     pub params: Vec<String>,
     pub sql: Vec<String>,
@@ -30,6 +41,13 @@ impl Module {
             )));
         }
         Ok((input, sql))
+    }
+
+    pub fn verify(&self, cookie: Option<&str>) -> anyhow::Result<()> {
+        if matches!(self.auth, Some(AuthSettings::VerifyToken(_))) {
+            return decode(cookie.ok_or_else(|| anyhow!("missing cookie"))?).map(|v| ());
+        }
+        Ok(())
     }
 
     pub fn bindings<'a, 'b: 'a, Q, T>(
@@ -52,9 +70,15 @@ impl Module {
         let mut endpoint = None;
         let mut params = vec![];
         let mut params_set = BTreeSet::new();
+        let mut auth = None;
 
-        for decorator in decorators.iter() {
-            match *decorator {
+        for decorator in decorators.into_iter() {
+            match decorator {
+                Decorator::Auth(_) if auth.is_some() => Result::Err(Err::Failure(const_error(
+                    input,
+                    "multiple auth declarations detected",
+                )))?,
+                Decorator::Auth(val) => auth = Some(val),
                 Decorator::Param(param) if params_set.contains(param) => {
                     Result::Err(Err::Failure(const_error(
                         input,
@@ -83,6 +107,7 @@ impl Module {
         )(input)?;
 
         let module = Self {
+            auth,
             endpoint,
             sql: statements
                 .into_iter()
@@ -108,7 +133,7 @@ where id = @id
 AND @email = 'testing 123 @haha' 
 OR 0 = @id"#;
         let (_, module) = Module::parse(test_str).unwrap();
-        assert_eq!(format!("{:?}", &module), "Module { endpoint: None, params: [\"email\", \"id\"], sql: [\"select * from users \\nwhere id = $1 \\nAND $2 = \\\'testing 123 @haha\\\' \\nOR 0 = $1\"] }");
+        assert_eq!(format!("{:?}", &module), "Module { auth: None, endpoint: None, params: [\"email\", \"id\"], sql: [\"select * from users \\nwhere id = $1 \\nAND $2 = \\\'testing 123 @haha\\\' \\nOR 0 = $1\"] }");
 
         let test_str = r#"
 /* @param email 

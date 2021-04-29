@@ -1,6 +1,11 @@
+use std::collections::BTreeMap;
+
 use anyhow::anyhow;
+use serde::Deserialize;
 use serde_json::Value;
 
+#[derive(Deserialize)]
+#[serde(untagged)]
 pub enum Binding {
     Int(i64),
     Float(f64),
@@ -8,6 +13,16 @@ pub enum Binding {
     String(String),
     Json(Value),
     Null,
+}
+
+pub fn bindings_from_json(
+    payload: BTreeMap<String, Value>,
+) -> anyhow::Result<BTreeMap<String, Binding>> {
+    let bindings: BTreeMap<String, Binding> = payload
+        .into_iter()
+        .map(|(val, res)| Ok((val, Binding::from_json(res)?)))
+        .collect::<anyhow::Result<BTreeMap<String, Binding>>>()?;
+    Ok(bindings)
 }
 
 impl Binding {

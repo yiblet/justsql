@@ -8,7 +8,7 @@ use sqlx::{
     Decode, Postgres, Type, ValueRef,
 };
 use sqlx::{Column, ColumnIndex, Row, TypeInfo};
-use std::{borrow::Borrow, error::Error};
+use std::{borrow::Borrow, collections::BTreeMap, error::Error};
 
 // bool	BOOL
 // i8	  CHAR
@@ -137,7 +137,22 @@ where
     })
 }
 
-pub fn convert_row(value_ref: PgValueRef) -> anyhow::Result<RowType> {
+pub fn convert_row(row: sqlx::postgres::PgRow) -> anyhow::Result<BTreeMap<String, RowType>> {
+    let map = row.columns()
+        .iter()
+        .map(|col| -> anyhow::Result<_> {
+            let name = col.name();
+            let value_ref = row.try_get_raw(col.ordinal()).map_err(|err| {
+                anyhow!("could not get column {} due to {}", name, err.to_string())
+            })?;
+
+            Ok((name.to_string(), convert_value(value_ref)?))
+        })
+        .collect::<anyhow::Result<BTreeMap<_, _>>>()?;
+    Ok(map)
+}
+
+fn convert_value(value_ref: PgValueRef) -> anyhow::Result<RowType> {
     let type_info = value_ref.type_info();
     let row_type: RowType = match type_info.name() {
         "BOOL" => RowType::Bool(try_get(value_ref)?),

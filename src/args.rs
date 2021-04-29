@@ -11,7 +11,7 @@ fn parse_arg(input: &str) -> anyhow::Result<(&str, &str)> {
     Ok((prefix.trim(), &suffix[1..].trim()))
 }
 
-pub type Args<'a> = BTreeMap<&'a str, Literal>;
+pub type Args<'a, T> = BTreeMap<&'a str, T>;
 
 pub fn parse_args<'a, I: Iterator<Item = &'a str>>(
     input: I,

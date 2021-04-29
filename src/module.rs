@@ -5,7 +5,10 @@ use crate::{
 };
 use anyhow::anyhow;
 use nom::{combinator::eof, multi::many_till, Err};
-use std::collections::{BTreeMap, BTreeSet};
+use std::{
+    borrow::Borrow,
+    collections::{BTreeMap, BTreeSet},
+};
 
 // TODO set up "pre-interpolated" sql type
 #[derive(Debug, Clone)]
@@ -30,10 +33,13 @@ impl Module {
         Ok((input, sql))
     }
 
-    pub fn bindings<'a, 'b: 'a>(
+    pub fn bindings<'a, 'b: 'a, Q, T>(
         &'b self,
-        bindings: &'a Args,
-    ) -> impl Iterator<Item = anyhow::Result<&'a Literal>> {
+        bindings: &'a BTreeMap<Q, T>,
+    ) -> impl Iterator<Item = anyhow::Result<&'a T>>
+    where
+        Q: Borrow<str> + Ord,
+    {
         self.params.iter().map(move |param| {
             bindings
                 .get(param.as_str())

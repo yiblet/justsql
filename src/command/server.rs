@@ -8,12 +8,13 @@ use clap::Clap;
 
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use sqlx::PgPool;
+use sqlx::{postgres::PgArguments, PgPool, Postgres};
 
 use crate::{
     ast::{AuthSettings, Module},
     binding::bindings_from_json,
-    query::build_query,
+    engine::{Evaluator, Importer, UpfrontImporter},
+    query::build_queries,
     row_type::{convert_row, RowType},
     util::{get_cookie_domain, get_cookie_http_only, get_cookie_secure},
 };
@@ -67,10 +68,10 @@ async fn root() -> impl Responder {
     format!("ok")
 }
 
-async fn auth_query(
+async fn auth_query<I: Importer>(
     req: HttpRequest,
     data: web::Json<Query>,
-    modules: web::Data<BTreeMap<String, Module>>,
+    evaluator: web::Data<Evaluator<I>>,
     pool: web::Data<PgPool>,
 ) -> impl Responder {
     enum ReturnType {
@@ -80,38 +81,36 @@ async fn auth_query(
     }
 
     let cookie = req.cookie(COOKIE_NAME);
-    let modules = modules.get_ref();
     let pool = pool.get_ref();
     let data = data.into_inner();
 
     let (endpoint, payload) = (data.endpoint, data.payload);
     let return_type: anyhow::Result<ReturnType> = async move {
-        let module = modules
-            .get(endpoint.as_str())
-            .ok_or_else(|| anyhow!("endpoint does not exist"))?;
-
-        module.verify(cookie.as_ref().map(|cookie| cookie.value()))?;
-
-        let auth = module
-            .auth
-            .as_ref()
-            .ok_or_else(|| anyhow!("endpoint {} is not an auth endpoint"))?;
-
         let bindings = bindings_from_json(payload)?;
 
         async {
             let mut tx = pool.begin().await?;
-            let (last, statements) = module.sql.split_last().ok_or_else(|| {
-                anyhow!(
-                    "module at endpoint {} does not have any statements",
-                    module.endpoint.as_ref().map_or("", String::as_str),
-                )
-            })?;
-            for statement in statements {
-                let query = build_query(statement.as_str(), &bindings, &module)?;
-                query.execute(&mut tx).await?;
+            let module = evaluator.endpoint(endpoint.as_str())?;
+            let auth = module
+                .auth
+                .as_ref()
+                .ok_or_else(|| anyhow!("module at endpoint {} does not have any auth settings"))?;
+            module.verify(cookie.as_ref().map(|cookie| cookie.value()))?;
+
+            let statements = evaluator.evaluate_endpoint(endpoint.as_str(), &bindings)?;
+            let queries = build_queries(&statements)?;
+            let mut query: Option<sqlx::query::Query<Postgres, PgArguments>> = None;
+
+            for cur in queries {
+                if let Some(cur_query) = query {
+                    cur_query.execute(&mut tx).await?;
+                }
+                query = Some(cur);
             }
-            let query = build_query(last.as_str(), &bindings, &module)?;
+
+            let query = query.ok_or_else(|| {
+                anyhow!("module at endpoint {} did not have any queries", endpoint)
+            })?;
 
             let res: ReturnType = match auth {
                 AuthSettings::RemoveToken => {
@@ -131,7 +130,6 @@ async fn auth_query(
                         }
                     }
                 }
-
                 AuthSettings::SetToken(exp) => {
                     // TODO if the user specifies more than one row
                     // explain that exactly one row is expcted
@@ -179,14 +177,14 @@ async fn auth_query(
     )
 }
 
-async fn run_queries(
+async fn run_queries<I: Importer>(
     req: HttpRequest,
     data: web::Json<Vec<Query>>,
-    modules: web::Data<BTreeMap<String, Module>>,
+    evaluator: web::Data<Evaluator<I>>,
     pool: web::Data<PgPool>,
 ) -> impl Responder {
     let cookie = req.cookie(COOKIE_NAME);
-    let modules = modules.get_ref();
+    let evaluator = evaluator.get_ref();
     let pool = pool.get_ref();
     let data = data.into_inner();
 
@@ -205,26 +203,27 @@ async fn run_queries(
             .iter()
             .zip(payloads.into_iter())
             .map(|(endpoint, payload)| async move {
-                let module = modules
-                    .get(endpoint.as_str())
-                    .ok_or_else(|| anyhow!("endpoint does not exist"))?;
+                let module = evaluator.endpoint(endpoint.as_str())?;
                 module.verify(cookie_content.map(|cookie| cookie.value()))?;
 
                 let bindings = bindings_from_json(payload)?;
 
                 async {
                     let mut tx = pool.begin().await?;
-                    let (last, statements) = module.sql.split_last().ok_or_else(|| {
-                        anyhow!(
-                            "module at endpoint {} does not have any statements",
-                            module.endpoint.as_ref().map_or("", String::as_str),
-                        )
-                    })?;
-                    for statement in statements {
-                        let query = build_query(statement.as_str(), &bindings, &module)?;
-                        query.execute(&mut tx).await?;
+                    let statements = evaluator.evaluate_endpoint(endpoint.as_str(), &bindings)?;
+                    let queries = build_queries(&statements)?;
+                    let mut query: Option<sqlx::query::Query<Postgres, PgArguments>> = None;
+
+                    for cur in queries {
+                        if let Some(cur_query) = query {
+                            cur_query.execute(&mut tx).await?;
+                        }
+                        query = Some(cur);
                     }
-                    let query = build_query(last.as_str(), &bindings, &module)?;
+
+                    let query = query.ok_or_else(|| {
+                        anyhow!("module at endpoint {} did not have any queries", endpoint)
+                    })?;
                     let results = query
                         .fetch_all(&mut tx)
                         .await?
@@ -271,24 +270,24 @@ pub async fn run_server(cmd: Server) -> anyhow::Result<()> {
         .connect(uri.as_str())
         .await?;
 
-    let modules: BTreeMap<String, Module> = glob::glob(cmd.glob.as_str())?
-        .filter_map(|file| {
-            file.map_err(|err| err.into())
-                .and_then(Module::from_path)
-                .map(|val| Some((val.endpoint.as_ref()?.clone(), val)))
-                .transpose()
-        })
-        .collect::<anyhow::Result<BTreeMap<String, Module>>>()?;
+    let importer = UpfrontImporter::from_glob(cmd.glob.as_str())?;
+    let evaluator = Evaluator::with_importer(importer);
 
     HttpServer::new(move || {
         App::new()
             .wrap(middleware::Logger::default())
             .wrap(middleware::Compress::default())
             .data(pool.clone())
-            .data(modules.clone())
+            .data(evaluator.clone())
             .route("/", web::get().to(root))
-            .route("/api/v1/auth", web::post().to(auth_query))
-            .route("/api/v1/query", web::post().to(run_queries))
+            .route(
+                "/api/v1/auth",
+                web::post().to(auth_query::<UpfrontImporter>),
+            )
+            .route(
+                "/api/v1/query",
+                web::post().to(run_queries::<UpfrontImporter>),
+            )
     })
     .bind(format!("0.0.0.0:{}", cmd.port))?
     .run()

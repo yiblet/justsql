@@ -1,14 +1,20 @@
+use either::Either;
 use nom::{
     branch::alt,
-    bytes::complete::{is_not, tag, take, take_until, take_while},
+    bytes::complete::{is_not, tag, take, take_until, take_while, take_while1},
     combinator::opt,
     multi::fold_many0,
-    sequence::{delimited, preceded, terminated},
+    sequence::{delimited, preceded, terminated, tuple},
     Err, IResult, Parser,
 };
-use std::collections::BTreeMap;
 use std::fmt::Write;
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    mem,
+};
 use thiserror::Error;
+
+use super::module::{Interp, Statement};
 
 #[derive(Error, Debug, Clone)]
 pub enum ParseError<'a> {
@@ -33,6 +39,10 @@ impl<'a> nom::error::ParseError<&'a str> for ParseError<'a> {
 }
 
 pub type PResult<'a, O> = IResult<&'a str, O, ParseError<'a>>;
+
+pub fn non_empty_space(input: &str) -> PResult<&str> {
+    take_while(|chr: char| chr.is_whitespace())(input)
+}
 
 pub fn space(input: &str) -> PResult<&str> {
     opt(take_while(|chr: char| chr.is_whitespace()))(input)
@@ -123,54 +133,60 @@ fn string_literal<'a>(input: &'a str) -> PResult<&'a str> {
     Ok((output, &input[..input.len() - output.len()]))
 }
 
-pub fn normalize_sql<'a>(mut input: &'a str) -> PResult<(String, BTreeMap<&'a str, usize>)> {
-    let mut res = String::with_capacity(input.len());
-    let mut map: BTreeMap<&'a str, usize> = BTreeMap::new();
+pub fn normalize_sql<'a>(
+    mut input: &'a str,
+    params_set: &BTreeSet<&str>,
+) -> PResult<'a, Statement> {
+    let mut res = Vec::new();
+
+    let mut cur = String::new();
 
     while input != "" && &input[0..1] != ";" {
         let literal = alt((
             string_literal,
-            take_while(|chr: char| !chr.is_whitespace() && chr != ';'),
+            take_while1(|chr: char| !chr.is_whitespace() && chr != ';'),
         ))
-        .map(|res| (None, res));
-        let replace = preceded(tag("@"), take_while(|chr: char| chr.is_alphanumeric()))
-            .map(|res: &str| (Some(res), res));
+        .map(|res| res)
+        .map(Either::Left);
 
-        let (output, step) = space(input)?;
-        res.push_str(step);
-
-        let (output, (arg_opt, step)) = alt((replace, literal))(output)?;
-        match arg_opt {
-            Some(key) => {
-                let arg_number = match map.get(key) {
-                    Some(value) => *value,
-                    None => {
-                        let cur_arg_number = map.len() + 1;
-                        map.insert(key, cur_arg_number);
-                        cur_arg_number
-                    }
-                };
-                write!(&mut res, "${}", arg_number)
-                    .map_err(|_| Err::Error(const_error(output, "failed to insert into string")))?;
+        let replace = |replace: &'a str| -> PResult<Interp> {
+            let (output, param) =
+                preceded(tag("@"), take_while1(|chr: char| chr.is_alphanumeric()))(replace)?;
+            if !params_set.contains(param) {
+                Err(nom::Err::Failure(const_error(
+                    replace,
+                    "undefined parameter",
+                )))?
             }
-            None => {
-                res.push_str(step);
+            Ok((output, Interp::Param(param.to_owned())))
+        }
+        .map(Either::Right);
+
+        let (output, interp) = alt((replace, literal, non_empty_space.map(Either::Left)))(input)?;
+        match interp {
+            Either::Left(literal) => {
+                cur.push_str(literal);
+            }
+            Either::Right(interp) => {
+                if cur != "" {
+                    res.push(Interp::Literal(mem::take(&mut cur)));
+                }
+                res.push(interp);
             }
         }
-
-        let (output, step) = space(output)?;
-        res.push_str(step);
-
         if input.len() == output.len() {
             panic!("infinite loop on {}", input);
         }
         input = output;
     }
+    if cur != "" {
+        res.push(Interp::Literal(mem::take(&mut cur)));
+    }
 
     let (input, _) = delimited(space, opt(tag(";")), space)(input)?;
 
     res.shrink_to_fit();
-    Ok((input, (res, map)))
+    Ok((input, (Statement(res))))
 }
 
 #[cfg(test)]
@@ -229,12 +245,13 @@ mod tests {
 
     #[test]
     fn normalize_sql_test() {
+        let map = ["id", "email"].iter().cloned().collect();
         let test_str =
             r#"select * from users where id = @id and @email = 'testing 123 @haha' OR 0 = @id"#;
-        let (_, (normalized_sql, _)) = normalize_sql(test_str).unwrap();
+        let (_, normalized_sql) = normalize_sql(test_str, &map).unwrap();
         assert_eq!(
-            normalized_sql,
-            "select * from users where id = $1 and $2 = \'testing 123 @haha\' OR 0 = $1",
+            format!("{:?}", normalized_sql),
+            "Statement([Literal(\"select * from users where id = \"), Param(\"id\"), Literal(\" and \"), Param(\"email\"), Literal(\" = \\\'testing 123 @haha\\\' OR 0 = \"), Param(\"id\")])",
         );
     }
 }

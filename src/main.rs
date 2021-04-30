@@ -8,6 +8,7 @@ mod query;
 mod row_type;
 mod server;
 mod util;
+mod engine;
 
 pub fn main() -> anyhow::Result<()> {
     env_logger::init_from_env(

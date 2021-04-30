@@ -11,6 +11,7 @@
 - add more tests 
 - enable returning more complicated postgres types
 - add endpoint versioning for seamless migrations
+- split server endpoints up to a full directory
 
 ## Minor
 

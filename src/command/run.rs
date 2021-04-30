@@ -9,16 +9,17 @@ use crate::{
 
 use super::{Command, Opts};
 
-/// run one module
+/// run one single file
 #[derive(Clap)]
 pub struct Run {
     /// location of the module file
     module: String,
 
-    /// arguments to pass per module (in the form of arg_name=value)
+    /// arguments to pass per module (in the form of 'arg_name=value')
     args: Vec<String>,
 
-    #[clap(long)]
+    /// This prints the calls to database instead of actually connecting
+    #[clap(short, long)]
     debug: bool,
 }
 
@@ -40,7 +41,8 @@ impl Command for Run {
         if self.debug {
             for statement in &module.sql {
                 println!("PREPARE query AS");
-                for lines in statement.split('\n').filter(|line| line.trim() != "") {
+                let (stmt, _) = statement.bind()?;
+                for lines in stmt.split('\n').filter(|line| line.trim() != "") {
                     println!("    {}", lines);
                 }
                 println!(";");
@@ -73,9 +75,13 @@ impl Command for Run {
                         .await?;
 
                     for statement in &module.sql {
-                        let mut query = sqlx::query(statement.as_str());
+                        let (stmt, binding) = statement.bind()?;
+                        let mut query = sqlx::query(stmt.as_str());
 
-                        for literal in module.bindings(&args) {
+                        for literal in binding
+                            .into_iter()
+                            .map(|b| args.get(b).ok_or_else(|| anyhow!("missing argument {}", b)))
+                        {
                             query = match literal? {
                                 Literal::Int(i) => query.bind(i),
                                 Literal::Float(f) => query.bind(f),

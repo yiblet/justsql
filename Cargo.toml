@@ -31,3 +31,5 @@ actix-rt = "2.2"
 
 env_logger = "0.8"
 jsonwebtoken = "7"
+path-clean = "0.1"
+either = "1.6"

@@ -10,6 +10,7 @@ use nom::{combinator::eof, multi::many_till, Err};
 use std::{
     borrow::Borrow,
     collections::{BTreeMap, BTreeSet},
+    fmt::Write,
     path::Path,
 };
 
@@ -21,49 +22,61 @@ pub enum AuthSettings {
     RemoveToken,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Interp {
+    Literal(String),
+    Param(String),
+    // AuthParam(String),
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct Statement(pub Vec<Interp>);
+
+impl Statement {
+    fn is_empty(&self) -> bool {
+        self.0.iter().all(|x| match x {
+            Interp::Literal(s) => s == "",
+            _ => false,
+        })
+    }
+
+    pub fn bind(&self) -> anyhow::Result<(String, Vec<&str>)> {
+        let mut params = vec![];
+        let mut mapping: BTreeMap<&str, usize> = BTreeMap::new();
+        let mut res = String::new();
+        for interp in &self.0 {
+            match interp {
+                Interp::Literal(lit) => write!(&mut res, "{}", lit.as_str())?,
+                Interp::Param(param) if mapping.contains_key(param.as_str()) => {
+                    write!(&mut res, "${}", mapping[param.as_str()])?
+                }
+                Interp::Param(param) => {
+                    let cur = mapping.len() + 1;
+                    mapping.insert(param.as_str(), cur);
+                    params.push(param.as_str());
+                    write!(&mut res, "${}", cur)?
+                }
+            }
+        }
+        Ok((res, params))
+    }
+}
+
 // TODO set up "pre-interpolated" sql type
 #[derive(Debug, Clone, Default)]
 pub struct Module {
     pub auth: Option<AuthSettings>,
     pub endpoint: Option<String>,
     pub params: Vec<String>,
-    pub sql: Vec<String>,
+    pub sql: Vec<Statement>,
 }
 
 impl Module {
-    fn normalize_sql_and_verify_params<'a>(
-        input: &'a str,
-        params_set: &BTreeSet<&str>,
-    ) -> PResult<'a, String> {
-        let (input, (sql, map)) = normalize_sql(input)?;
-        if !map.keys().cloned().all(|val| params_set.contains(val)) {
-            return Err(Err::Failure(const_error(
-                input,
-                "some used params are not declared",
-            )));
-        }
-        Ok((input, sql))
-    }
-
     pub fn verify(&self, cookie: Option<&str>) -> anyhow::Result<()> {
         if matches!(self.auth, Some(AuthSettings::VerifyToken(_))) {
             return decode(cookie.ok_or_else(|| anyhow!("missing cookie"))?).map(|_| ());
         }
         Ok(())
-    }
-
-    pub fn bindings<'a, 'b: 'a, Q, T>(
-        &'b self,
-        bindings: &'a BTreeMap<Q, T>,
-    ) -> impl Iterator<Item = anyhow::Result<&'a T>>
-    where
-        Q: Borrow<str> + Ord,
-    {
-        self.params.iter().map(move |param| {
-            bindings
-                .get(param.as_str())
-                .ok_or_else(|| anyhow!("parameter {} is not bound to an argument", param))
-        })
     }
 
     pub fn from_path<A: AsRef<Path>>(input: A) -> anyhow::Result<Module> {
@@ -114,17 +127,15 @@ impl Module {
             }
         }
 
-        let (input, (statements, _)) = many_till(
-            |input| Self::normalize_sql_and_verify_params(input, &params_set),
-            eof,
-        )(input)?;
+        let (input, (statements, _)) =
+            many_till(move |input| normalize_sql(input, &params_set), eof)(input)?;
 
         let module = Self {
             auth,
             endpoint,
             sql: statements
                 .into_iter()
-                .filter(|stmt| stmt.as_str().trim() != "")
+                .filter(|stmt| !stmt.is_empty())
                 .collect(),
             params: params.into_iter().map(String::from).collect(),
         };
@@ -146,7 +157,7 @@ where id = @id
 AND @email = 'testing 123 @haha' 
 OR 0 = @id"#;
         let (_, module) = Module::parse(test_str).unwrap();
-        assert_eq!(format!("{:?}", &module), "Module { auth: None, endpoint: None, params: [\"email\", \"id\"], sql: [\"select * from users \\nwhere id = $1 \\nAND $2 = \\\'testing 123 @haha\\\' \\nOR 0 = $1\"] }");
+        assert_eq!(format!("{:?}", &module), "Module { auth: None, endpoint: None, params: [\"email\", \"id\"], sql: [Statement([Literal(\"select * from users \\nwhere id = \"), Param(\"id\"), Literal(\" \\nAND \"), Param(\"email\"), Literal(\" = \\\'testing 123 @haha\\\' \\nOR 0 = \"), Param(\"id\")])] }");
 
         let test_str = r#"
 /* @param email 
@@ -159,7 +170,7 @@ OR 0 = @id"#;
         let err = Module::parse(test_str).unwrap_err();
         assert_eq!(
             format!("{:?}", &err),
-            "Failure(ConstError(\"\", \"some used params are not declared\"))"
+            "Failure(ConstError(\"@id \\nAND @email = \\\'testing 123 @haha\\\' \\nOR 0 = @id\", \"undefined parameter\"))"
         );
 
         let test_str = r#"
@@ -177,16 +188,5 @@ OR 0 = @id ;
         "#;
         let err = Module::parse(test_str).unwrap().0;
         assert_eq!(err, "");
-
-        let test_str = r#"
-/* @param email 
- */
-@email;test;;;test;
-"#;
-        let statements = Module::parse(test_str).unwrap().1.sql;
-        assert_eq!(
-            statements,
-            vec!["$1".to_owned(), "test".to_owned(), "test".to_owned(),]
-        );
     }
 }

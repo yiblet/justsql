@@ -149,6 +149,21 @@ pub fn normalize_sql<'a>(
         .map(|res| res)
         .map(Either::Left);
 
+        let auth = |replace: &'a str| -> PResult<Interp> {
+            let (output, param) = preceded(
+                tag("@auth."),
+                take_while1(|chr: char| chr.is_alphanumeric()),
+            )(replace)?;
+            if !params_set.contains(param) {
+                Err(nom::Err::Failure(const_error(
+                    replace,
+                    "undefined parameter",
+                )))?
+            }
+            Ok((output, Interp::AuthParam(param.to_owned())))
+        }
+        .map(Either::Right);
+
         let replace = |replace: &'a str| -> PResult<Interp> {
             let (output, param) =
                 preceded(tag("@"), take_while1(|chr: char| chr.is_alphanumeric()))(replace)?;
@@ -162,7 +177,8 @@ pub fn normalize_sql<'a>(
         }
         .map(Either::Right);
 
-        let (output, interp) = alt((replace, literal, non_empty_space.map(Either::Left)))(input)?;
+        let (output, interp) =
+            alt((auth, replace, literal, non_empty_space.map(Either::Left)))(input)?;
         match interp {
             Either::Left(literal) => {
                 cur.push_str(literal);

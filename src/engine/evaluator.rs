@@ -1,6 +1,6 @@
 use std::{collections::BTreeMap, fmt, path::Path, sync::Arc};
 
-use crate::ast::Module;
+use crate::ast::{Module, ParamType};
 use anyhow::anyhow;
 
 use super::importer::Importer;
@@ -27,24 +27,27 @@ impl<I: Importer + Send + Sync + 'static + Clone> Evaluator<I> {
         &self,
         endpoint: &str,
         bindings: &'a BTreeMap<String, A>,
+        auth_bindings: Option<&'a BTreeMap<String, A>>,
     ) -> anyhow::Result<Vec<(String, Vec<&'a A>)>> {
         let module = self.importer.get_module_from_endpoint(endpoint)?;
-        self.evaluate(module.as_ref(), bindings)
+        self.evaluate(module.as_ref(), bindings, auth_bindings)
     }
 
     pub fn evaluate_module<'a, A>(
         &self,
         location: &Path,
         bindings: &'a BTreeMap<String, A>,
+        auth_bindings: Option<&'a BTreeMap<String, A>>,
     ) -> anyhow::Result<Vec<(String, Vec<&'a A>)>> {
         let module = self.importer.get_module_from_location(location)?;
-        self.evaluate(module.as_ref(), bindings)
+        self.evaluate(module.as_ref(), bindings, auth_bindings)
     }
 
     fn evaluate<'a, A>(
         &self,
         module: &Module,
         bindings: &'a BTreeMap<String, A>,
+        auth_bindings: Option<&'a BTreeMap<String, A>>,
     ) -> anyhow::Result<Vec<(String, Vec<&'a A>)>> {
         module
             .sql
@@ -53,10 +56,14 @@ impl<I: Importer + Send + Sync + 'static + Clone> Evaluator<I> {
                 let (res, mapping) = stmt.bind()?;
                 let bindings: Vec<_> = mapping
                     .into_iter()
-                    .map(|param| {
-                        bindings
+                    .map(|param| match param {
+                        ParamType::Param(param) => bindings
                             .get(param)
-                            .ok_or_else(|| anyhow!("parameter {} does not exist", param))
+                            .ok_or_else(|| anyhow!("parameter {} does not exist", param)),
+                        ParamType::Auth(param) => auth_bindings
+                            .ok_or_else(|| anyhow!("must be authorized"))?
+                            .get(param)
+                            .ok_or_else(|| anyhow!("parameter {} does not exist", param)),
                     })
                     .collect::<anyhow::Result<_>>()?;
                 Ok((res, bindings))

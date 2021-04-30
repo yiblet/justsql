@@ -3,7 +3,7 @@ use clap::Clap;
 
 use crate::{
     args::{parse_args, Literal},
-    ast::Module,
+    ast::{Module, ParamType},
     row_type::convert_row,
 };
 
@@ -78,10 +78,14 @@ impl Command for Run {
                         let (stmt, binding) = statement.bind()?;
                         let mut query = sqlx::query(stmt.as_str());
 
-                        for literal in binding
-                            .into_iter()
-                            .map(|b| args.get(b).ok_or_else(|| anyhow!("missing argument {}", b)))
-                        {
+                        for literal in binding.into_iter().map(|param_type| match param_type {
+                            ParamType::Param(param) => args
+                                .get(param)
+                                .ok_or_else(|| anyhow!("missing argument {}", param)),
+                            ParamType::Auth(_) => {
+                                Err(anyhow!("cannot use file that requires auth params with this justsql command"))
+                            }
+                        }) {
                             query = match literal? {
                                 Literal::Int(i) => query.bind(i),
                                 Literal::Float(f) => query.bind(f),

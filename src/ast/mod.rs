@@ -2,5 +2,4 @@ mod decorator;
 mod module;
 mod parser;
 
-pub use module::AuthSettings;
-pub use module::Module;
+pub use module::{AuthSettings, Module, ParamType, Statement};

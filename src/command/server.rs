@@ -95,9 +95,13 @@ async fn auth_query<I: Importer>(
                 .auth
                 .as_ref()
                 .ok_or_else(|| anyhow!("module at endpoint {} does not have any auth settings"))?;
-            module.verify(cookie.as_ref().map(|cookie| cookie.value()))?;
+            let auth_bindings = module.verify(cookie.as_ref().map(|cookie| cookie.value()))?;
 
-            let statements = evaluator.evaluate_endpoint(endpoint.as_str(), &bindings)?;
+            let statements = evaluator.evaluate_endpoint(
+                endpoint.as_str(),
+                &bindings,
+                auth_bindings.as_ref(),
+            )?;
             let queries = build_queries(&statements)?;
             let mut query: Option<sqlx::query::Query<Postgres, PgArguments>> = None;
 
@@ -204,13 +208,17 @@ async fn run_queries<I: Importer>(
             .zip(payloads.into_iter())
             .map(|(endpoint, payload)| async move {
                 let module = evaluator.endpoint(endpoint.as_str())?;
-                module.verify(cookie_content.map(|cookie| cookie.value()))?;
+                let auth_bindings = module.verify(cookie_content.map(|cookie| cookie.value()))?;
 
                 let bindings = bindings_from_json(payload)?;
 
                 async {
                     let mut tx = pool.begin().await?;
-                    let statements = evaluator.evaluate_endpoint(endpoint.as_str(), &bindings)?;
+                    let statements = evaluator.evaluate_endpoint(
+                        endpoint.as_str(),
+                        &bindings,
+                        auth_bindings.as_ref(),
+                    )?;
                     let queries = build_queries(&statements)?;
                     let mut query: Option<sqlx::query::Query<Postgres, PgArguments>> = None;
 

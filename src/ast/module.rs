@@ -3,12 +3,12 @@ use crate::{
         decorator::Decorator,
         parser::{const_error, normalize_sql, PResult},
     },
+    binding::Binding,
     server::auth::decode,
 };
 use anyhow::anyhow;
 use nom::{combinator::eof, multi::many_till, Err};
 use std::{
-    borrow::Borrow,
     collections::{BTreeMap, BTreeSet},
     fmt::Write,
     path::Path,
@@ -26,11 +26,17 @@ pub enum AuthSettings {
 pub enum Interp {
     Literal(String),
     Param(String),
-    // AuthParam(String),
+    AuthParam(String),
 }
 
 #[derive(Debug, Clone, Default)]
 pub struct Statement(pub Vec<Interp>);
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Copy)]
+pub enum ParamType<'a> {
+    Auth(&'a str),
+    Param(&'a str),
+}
 
 impl Statement {
     fn is_empty(&self) -> bool {
@@ -40,20 +46,33 @@ impl Statement {
         })
     }
 
-    pub fn bind(&self) -> anyhow::Result<(String, Vec<&str>)> {
+    pub fn bind(&self) -> anyhow::Result<(String, Vec<ParamType>)> {
         let mut params = vec![];
-        let mut mapping: BTreeMap<&str, usize> = BTreeMap::new();
+        let mut mapping: BTreeMap<ParamType, usize> = BTreeMap::new();
         let mut res = String::new();
         for interp in &self.0 {
             match interp {
                 Interp::Literal(lit) => write!(&mut res, "{}", lit.as_str())?,
-                Interp::Param(param) if mapping.contains_key(param.as_str()) => {
-                    write!(&mut res, "${}", mapping[param.as_str()])?
+                Interp::AuthParam(param)
+                    if mapping.contains_key(&ParamType::Auth(param.as_str())) =>
+                {
+                    write!(&mut res, "${}", mapping[&ParamType::Auth(param.as_str())])?
+                }
+                Interp::AuthParam(param) => {
+                    let cur = mapping.len() + 1;
+                    let param = ParamType::Auth(param);
+                    mapping.insert(param, cur);
+                    params.push(param);
+                    write!(&mut res, "${}", cur)?
+                }
+                Interp::Param(param) if mapping.contains_key(&ParamType::Param(param.as_str())) => {
+                    write!(&mut res, "${}", mapping[&ParamType::Param(param.as_str())])?
                 }
                 Interp::Param(param) => {
                     let cur = mapping.len() + 1;
-                    mapping.insert(param.as_str(), cur);
-                    params.push(param.as_str());
+                    let param = ParamType::Param(param);
+                    mapping.insert(param, cur);
+                    params.push(param);
                     write!(&mut res, "${}", cur)?
                 }
             }
@@ -72,11 +91,15 @@ pub struct Module {
 }
 
 impl Module {
-    pub fn verify(&self, cookie: Option<&str>) -> anyhow::Result<()> {
+    pub fn verify(
+        &self,
+        cookie: Option<&str>,
+    ) -> anyhow::Result<Option<BTreeMap<String, Binding>>> {
         if matches!(self.auth, Some(AuthSettings::VerifyToken(_))) {
-            return decode(cookie.ok_or_else(|| anyhow!("missing cookie"))?).map(|_| ());
+            return decode(cookie.ok_or_else(|| anyhow!("missing cookie"))?)
+                .map(|claim| Some(claim.claims));
         }
-        Ok(())
+        Ok(None)
     }
 
     pub fn from_path<A: AsRef<Path>>(input: A) -> anyhow::Result<Module> {
@@ -96,15 +119,14 @@ impl Module {
         let mut endpoint = None;
         let mut params = vec![];
         let mut params_set = BTreeSet::new();
-        let mut auth = None;
+        let mut auth_settings = None;
 
         for decorator in decorators.into_iter() {
             match decorator {
-                Decorator::Auth(_) if auth.is_some() => Result::Err(Err::Failure(const_error(
-                    input,
-                    "multiple auth declarations detected",
-                )))?,
-                Decorator::Auth(val) => auth = Some(val),
+                Decorator::Auth(_) if auth_settings.is_some() => Result::Err(Err::Failure(
+                    const_error(input, "multiple auth declarations detected"),
+                ))?,
+                Decorator::Auth(val) => auth_settings = Some(val),
                 Decorator::Param(param) if params_set.contains(param) => {
                     Result::Err(Err::Failure(const_error(
                         input,
@@ -130,13 +152,25 @@ impl Module {
         let (input, (statements, _)) =
             many_till(move |input| normalize_sql(input, &params_set), eof)(input)?;
 
+        let sql: Vec<Statement> = statements
+            .into_iter()
+            .filter(|stmt| !stmt.is_empty())
+            .collect();
+
+        let has_auth = sql
+            .iter()
+            .flat_map(|stmt| stmt.0.iter())
+            .any(|interp| matches!(interp, Interp::AuthParam(param)));
+
+        if has_auth && auth_settings.is_none() {
+            // set to verify token if there is an auth token used
+            auth_settings = Some(AuthSettings::VerifyToken(None))
+        }
+
         let module = Self {
-            auth,
+            auth: auth_settings,
             endpoint,
-            sql: statements
-                .into_iter()
-                .filter(|stmt| !stmt.is_empty())
-                .collect(),
+            sql,
             params: params.into_iter().map(String::from).collect(),
         };
         Ok((input, module))

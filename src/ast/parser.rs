@@ -4,14 +4,10 @@ use nom::{
     bytes::complete::{is_not, tag, take, take_until, take_while, take_while1},
     combinator::opt,
     multi::fold_many0,
-    sequence::{delimited, preceded, terminated, tuple},
+    sequence::{delimited, preceded, terminated},
     Err, IResult, Parser,
 };
-use std::fmt::Write;
-use std::{
-    collections::{BTreeMap, BTreeSet},
-    mem,
-};
+use std::{collections::BTreeSet, mem};
 use thiserror::Error;
 
 use super::module::{Interp, Statement};

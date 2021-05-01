@@ -10,7 +10,7 @@ use serde_json::{json, Value};
 use sqlx::{postgres::PgArguments, PgPool, Postgres};
 
 use crate::{
-    ast::{AuthSettings, Module},
+    ast::AuthSettings,
     binding::bindings_from_json,
     engine::{Evaluator, Importer, UpfrontImporter},
     query::build_queries,

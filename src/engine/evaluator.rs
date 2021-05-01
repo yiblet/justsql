@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, fmt, path::Path, sync::Arc};
+use std::{collections::BTreeMap, path::Path, sync::Arc};
 
 use crate::ast::{Module, ParamType};
 
@@ -32,6 +32,7 @@ impl<I: Importer + Send + Sync + 'static + Clone> Evaluator<I> {
         self.evaluate(module.as_ref(), bindings, auth_bindings)
     }
 
+    #[allow(dead_code)]
     pub fn evaluate_module<'a, A>(
         &self,
         location: &Path,

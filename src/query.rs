@@ -1,8 +1,6 @@
-use std::collections::BTreeMap;
-
 use sqlx::{postgres::PgArguments, Postgres};
 
-use crate::{ast::Module, binding::Binding, engine::Evaluator};
+use crate::binding::Binding;
 
 pub fn build_queries<'a>(
     statements: &'a Vec<(String, Vec<&Binding>)>,

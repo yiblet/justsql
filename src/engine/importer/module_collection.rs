@@ -1,11 +1,6 @@
-use std::{
-    collections::BTreeMap,
-    path::{Path, PathBuf},
-    sync::{Arc, Mutex},
-};
+use std::{collections::BTreeMap, path::PathBuf, sync::Arc};
 
 use crate::ast::Module;
-use path_clean::PathClean;
 
 #[derive(Default, Debug)]
 pub struct ModuleCollection {

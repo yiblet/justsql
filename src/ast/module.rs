@@ -159,7 +159,7 @@ impl Module {
         let has_auth = sql
             .iter()
             .flat_map(|stmt| stmt.0.iter())
-            .any(|interp| matches!(interp, Interp::AuthParam(param)));
+            .any(|interp| matches!(interp, Interp::AuthParam(_param)));
 
         if has_auth && auth_settings.is_none() {
             // set to verify token if there is an auth token used

@@ -133,6 +133,11 @@ fn string_literal<'a>(input: &'a str) -> PResult<&'a str> {
     Ok((output, &input[..input.len() - output.len()]))
 }
 
+pub fn is_alpha_or_underscore(chr: char) -> bool {
+    chr.is_alphanumeric() || chr == '_'
+}
+
+// FIXME normalize sql can't currently handle tags that are right inside of other things
 pub fn normalize_sql<'a>(
     mut input: &'a str,
     params_set: &BTreeSet<&str>,
@@ -150,23 +155,14 @@ pub fn normalize_sql<'a>(
         .map(Either::Left);
 
         let auth = |replace: &'a str| -> PResult<Interp> {
-            let (output, param) = preceded(
-                tag("@auth."),
-                take_while1(|chr: char| chr.is_alphanumeric()),
-            )(replace)?;
-            if !params_set.contains(param) {
-                Err(nom::Err::Failure(const_error(
-                    replace,
-                    "undefined parameter",
-                )))?
-            }
+            let (output, param) =
+                preceded(tag("@auth."), take_while1(is_alpha_or_underscore))(replace)?;
             Ok((output, Interp::AuthParam(param.to_owned())))
         }
         .map(Either::Right);
 
         let replace = |replace: &'a str| -> PResult<Interp> {
-            let (output, param) =
-                preceded(tag("@"), take_while1(|chr: char| chr.is_alphanumeric()))(replace)?;
+            let (output, param) = preceded(tag("@"), take_while1(is_alpha_or_underscore))(replace)?;
             if !params_set.contains(param) {
                 Err(nom::Err::Failure(const_error(
                     replace,

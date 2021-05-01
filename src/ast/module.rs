@@ -6,7 +6,6 @@ use crate::{
     binding::Binding,
     server::auth::decode,
 };
-use anyhow::anyhow;
 use nom::{combinator::eof, multi::many_till, Err};
 use std::{
     collections::{BTreeMap, BTreeSet},

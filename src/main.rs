@@ -1,14 +1,20 @@
 use clap::Clap;
 
+#[macro_use]
+extern crate log;
+
+#[macro_use]
+extern crate anyhow;
+
 mod args;
 mod ast;
 mod binding;
 mod command;
+mod engine;
 mod query;
 mod row_type;
 mod server;
 mod util;
-mod engine;
 
 pub fn main() -> anyhow::Result<()> {
     env_logger::init_from_env(

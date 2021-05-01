@@ -1,4 +1,3 @@
-use anyhow::anyhow;
 use clap::Clap;
 
 use crate::{

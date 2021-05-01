@@ -1,6 +1,5 @@
 use std::collections::BTreeMap;
 
-use anyhow::anyhow;
 use serde::Deserialize;
 use serde_json::Value;
 

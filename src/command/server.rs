@@ -3,7 +3,6 @@ use std::collections::BTreeMap;
 use actix_web::{
     cookie::Cookie, middleware, web, App, HttpRequest, HttpResponse, HttpServer, Responder,
 };
-use anyhow::anyhow;
 use clap::Clap;
 
 use serde::{Deserialize, Serialize};
@@ -49,15 +48,16 @@ pub struct QueryResult<A> {
     #[serde(rename = "endpoint")]
     endpoint: String,
     #[serde(flatten)]
-    data: QueryData<A>,
+    data: QueryStatus<A>,
 }
 
 #[derive(Serialize)]
-pub enum QueryData<A> {
-    #[serde(rename = "data")]
-    Data(A),
+#[serde(tag = "status")]
+pub enum QueryStatus<A> {
+    #[serde(rename = "success")]
+    Success { data: A },
     #[serde(rename = "error")]
-    Error(String),
+    Error { message: String },
 }
 
 // TODO allow COOKIE_NAME to change based on env vars
@@ -75,7 +75,7 @@ async fn auth_query<I: Importer>(
     pool: web::Data<PgPool>,
 ) -> impl Responder {
     enum ReturnType {
-        SetToken(String, String),
+        SetToken(String),
         RemoveToken,
         DoNothing,
     }
@@ -85,7 +85,7 @@ async fn auth_query<I: Importer>(
     let data = data.into_inner();
 
     let (endpoint, payload) = (data.endpoint, data.payload);
-    let return_type: anyhow::Result<ReturnType> = async move {
+    let return_type: anyhow::Result<ReturnType> = async {
         let bindings = bindings_from_json(payload)?;
 
         async {
@@ -129,8 +129,7 @@ async fn auth_query<I: Importer>(
                         None => ReturnType::DoNothing,
                         Some(exp) => {
                             let data = crate::server::auth::encode(&data, *exp)?;
-                            let cookie_domain = get_cookie_domain()?;
-                            ReturnType::SetToken(cookie_domain, data)
+                            ReturnType::SetToken(data)
                         }
                     }
                 }
@@ -144,8 +143,7 @@ async fn auth_query<I: Importer>(
                     let res = query.fetch_one(&mut tx).await?;
                     let data = convert_row(res)?;
                     let data = crate::server::auth::encode(&data, *exp)?;
-                    let cookie_domain = get_cookie_domain()?;
-                    ReturnType::SetToken(cookie_domain, data)
+                    ReturnType::SetToken(data)
                 }
             };
 
@@ -156,29 +154,55 @@ async fn auth_query<I: Importer>(
     }
     .await;
 
-    return_type.map_or_else(
-        |err| HttpResponse::BadRequest().json(json!({"error": err.to_string()})),
-        |value| match (value, req.cookie(COOKIE_NAME)) {
-            (ReturnType::RemoveToken, Some(c)) => HttpResponse::Ok()
-                .del_cookie(&c)
-                .json(json!({"success": "Cookie is deleted."})),
-
-            (ReturnType::RemoveToken, None) | (ReturnType::DoNothing, _) => {
-                HttpResponse::Ok().json(json!({"success": "User is authorized."}))
+    match return_type {
+        Err(err) => HttpResponse::BadRequest().json(QueryResult::<()> {
+            endpoint,
+            data: QueryStatus::Error {
+                message: err.to_string(),
+            },
+        }),
+        Ok(value) => match (value, req.cookie(COOKIE_NAME)) {
+            (ReturnType::RemoveToken, Some(c)) => {
+                HttpResponse::Ok().del_cookie(&c).json(QueryResult {
+                    endpoint,
+                    data: QueryStatus::Success {
+                        data: "Cookie is deleted.",
+                    },
+                })
             }
+            (ReturnType::RemoveToken, None) => HttpResponse::BadRequest().json(QueryResult::<()> {
+                endpoint,
+                data: QueryStatus::Error {
+                    message: "User was not logged in.".to_string(),
+                },
+            }),
+            (ReturnType::DoNothing, _) => HttpResponse::Ok().json(QueryResult {
+                endpoint,
+                data: QueryStatus::Success {
+                    data: "User is authorized.",
+                },
+            }),
+            (ReturnType::SetToken(token), _) => {
+                let mut builder = Cookie::build(COOKIE_NAME, token);
+                if let Some(domain) = get_cookie_domain().ok() {
+                    builder = builder.domain(domain)
+                }
 
-            (ReturnType::SetToken(domain, token), _) => HttpResponse::Ok()
-                .cookie(
-                    Cookie::build(COOKIE_NAME, token)
-                        .domain(domain)
-                        .path("/")
-                        .secure(get_cookie_secure())
-                        .http_only(get_cookie_http_only())
-                        .finish(),
-                )
-                .json(json!({"success": "User is authorized. Cookie is set."})),
+                let cookie = builder
+                    .path("/")
+                    .secure(get_cookie_secure())
+                    .http_only(get_cookie_http_only())
+                    .finish();
+
+                HttpResponse::Ok().cookie(cookie).json(json!(QueryResult {
+                    endpoint,
+                    data: QueryStatus::Success {
+                        data: "User is authorized. Cookie is set.",
+                    },
+                }))
+            }
         },
-    )
+    }
 }
 
 async fn run_queries<I: Importer>(
@@ -253,8 +277,8 @@ async fn run_queries<I: Importer>(
         .map(|(res, endpoint)| QueryResult {
             endpoint,
             data: match res.map_err(|err| err.to_string()) {
-                Ok(res) => QueryData::Data(res),
-                Err(res) => QueryData::Error(res),
+                Ok(res) => QueryStatus::Success { data: res },
+                Err(res) => QueryStatus::Error { message: res },
             },
         })
         .collect();
@@ -279,6 +303,11 @@ pub async fn run_server(cmd: Server) -> anyhow::Result<()> {
         .await?;
 
     let importer = UpfrontImporter::from_glob(cmd.glob.as_str())?;
+
+    for (endpoint, _) in importer.0.endpoints.iter() {
+        info!("using endpoint {}", endpoint)
+    }
+
     let evaluator = Evaluator::with_importer(importer);
 
     HttpServer::new(move || {

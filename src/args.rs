@@ -1,7 +1,5 @@
 use std::collections::BTreeMap;
 
-use anyhow::anyhow;
-
 fn parse_arg(input: &str) -> anyhow::Result<(&str, &str)> {
     let (prefix, suffix) = input.split_at(
         input

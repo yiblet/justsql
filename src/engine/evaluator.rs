@@ -1,7 +1,6 @@
 use std::{collections::BTreeMap, fmt, path::Path, sync::Arc};
 
 use crate::ast::{Module, ParamType};
-use anyhow::anyhow;
 
 use super::importer::Importer;
 

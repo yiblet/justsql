@@ -4,7 +4,6 @@ use std::{
 };
 
 use crate::ast::Module;
-use anyhow::anyhow;
 
 use super::{importer::Importer, module_collection::ModuleCollection};
 

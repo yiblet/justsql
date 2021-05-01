@@ -14,6 +14,8 @@ use crate::{
     ast::parser::{const_error, dash_comment, slash_comment, space, PResult, ParseError},
 };
 
+use super::parser::is_alpha_or_underscore;
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum Decorator<'a> {
     Endpoint(&'a str),
@@ -48,11 +50,11 @@ fn parse_interval(input: &str) -> PResult<f32> {
 
 impl<'a> Decorator<'a> {
     fn parse_param(input: &'a str) -> PResult<&'a str> {
-        decorator("param", take_while(|chr: char| chr.is_alphanumeric()))(input)
+        decorator("param", take_while(is_alpha_or_underscore))(input)
     }
 
     fn parse_endpoint(input: &'a str) -> PResult<&'a str> {
-        decorator("endpoint", take_while(|chr: char| chr.is_alphanumeric()))(input)
+        decorator("endpoint", take_while(is_alpha_or_underscore))(input)
     }
 
     fn parse_auth(input: &'a str) -> PResult<AuthSettings> {
@@ -89,6 +91,7 @@ where
     )
 }
 
+// TODO do not permit decorators with stuff after that isn't a space
 pub fn frontmatter<'a>(input: &'a str) -> PResult<Vec<Decorator<'a>>> {
     enum Either<A> {
         Many(Vec<A>),
@@ -131,6 +134,9 @@ mod tests {
 
     #[test]
     fn decorator_parse_test() {
+        let test_str = r#"@param shalom_yiblet"#;
+        assert_eq!(Decorator::parse_param(test_str).unwrap().1, "shalom_yiblet");
+
         let test_str = r#"@param shalom"#;
         assert_eq!(Decorator::parse_param(test_str).unwrap().1, "shalom");
 

@@ -5,7 +5,6 @@ use std::{
 };
 
 use crate::ast::Module;
-use anyhow::anyhow;
 use path_clean::PathClean;
 
 #[derive(Default, Debug)]

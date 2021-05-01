@@ -1,9 +1,7 @@
 use nom::{
-    branch::alt,
-    bytes::complete::{is_not, tag, take, take_until, take_while, take_while1},
+    bytes::complete::{is_not, tag, take, take_until, take_while},
     combinator::opt,
-    multi::fold_many0,
-    sequence::{delimited, preceded, terminated},
+    sequence::{preceded, terminated},
     Err, IResult, Parser,
 };
 
@@ -45,10 +43,6 @@ impl<'a> nom::error::ParseError<&'a str> for ParseError<'a> {
 }
 
 pub type PResult<'a, O> = IResult<&'a str, O, ParseError<'a>>;
-
-pub fn non_empty_space(input: &str) -> PResult<&str> {
-    take_while(|chr: char| chr.is_whitespace())(input)
-}
 
 pub fn space(input: &str) -> PResult<&str> {
     opt(take_while(|chr: char| chr.is_whitespace()))(input)

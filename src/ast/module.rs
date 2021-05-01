@@ -3,7 +3,7 @@ use crate::{
     binding::Binding,
     server::auth::decode,
 };
-use nom::{combinator::eof, multi::many_till, Err};
+use nom::Err;
 use std::{
     collections::{BTreeMap, BTreeSet},
     fmt::Write,
@@ -37,9 +37,13 @@ pub enum ParamType<'a> {
 }
 
 impl Statement {
-    fn is_empty(&self) -> bool {
-        self.0.iter().all(|x| match x {
-            Interp::Literal(s) => s == "",
+    /// identifies empty statements
+    /// i.e. the statement '; ;'
+    pub fn is_empty(&self) -> bool {
+        self.0.iter().all(|interp| match interp {
+            // all literals are pure whitespace
+            Interp::Literal(lit) => lit.find(|chr: char| !chr.is_whitespace()).is_none(),
+            // other types of interps do not exist
             _ => false,
         })
     }

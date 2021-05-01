@@ -1,17 +1,16 @@
-use either::Either;
 use nom::{
     branch::alt,
-    bytes::complete::{is_not, tag, take, take_until, take_while, take_while1},
-    combinator::{eof, opt, peek},
-    multi::{fold_many0, fold_many1, many0, separated_list1},
-    sequence::{delimited, preceded, terminated, tuple},
+    bytes::complete::{is_not, tag, take, take_while1},
+    combinator::opt,
+    multi::{fold_many0, fold_many1, separated_list1},
+    sequence::{delimited, preceded},
     Parser,
 };
-use std::{collections::BTreeSet, mem};
+use std::collections::BTreeSet;
 
 use super::{
     module::{Interp, Statement},
-    parser::{is_alpha_or_underscore, non_empty_space, space, ErrorKind, PResult, ParseError},
+    parser::{is_alpha_or_underscore, ErrorKind, PResult, ParseError},
 };
 
 fn string_literal<'a>(input: &'a str) -> PResult<&'a str> {
@@ -176,12 +175,7 @@ pub fn parse_sql_statements<'b, 'a: 'b>(
 
         let res: Vec<Statement> = res
             .into_iter()
-            .filter(|statement| {
-                statement.0.iter().any(|interp| match interp {
-                    Interp::Literal(lit) => lit.find(|chr: char| !chr.is_whitespace()).is_some(),
-                    _ => true,
-                })
-            })
+            .filter(|statement| !statement.is_empty())
             .collect();
 
         if res.len() == 0 {
@@ -258,6 +252,6 @@ mod tests {
         let test_str = r#"
         ;;; ;
         "#;
-        let err = parse_sql_statements(&set)(test_str).unwrap_err();
+        let _err = parse_sql_statements(&set)(test_str).unwrap_err();
     }
 }

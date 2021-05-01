@@ -1,4 +1,3 @@
-use either::Either;
 use nom::{
     branch::alt,
     bytes::complete::{is_not, tag, take, take_until, take_while, take_while1},
@@ -7,26 +6,37 @@ use nom::{
     sequence::{delimited, preceded, terminated},
     Err, IResult, Parser,
 };
-use std::{collections::BTreeSet, mem};
-use thiserror::Error;
 
-use super::module::{Interp, Statement};
+use thiserror::Error;
 
 #[derive(Error, Debug, Clone)]
 pub enum ParseError<'a> {
-    #[error("Parser failed at {0} due to {1:?}")]
-    ParseError(&'a str, nom::error::ErrorKind),
+    #[error("Parser failed at {0}")]
+    NomError(&'a str, nom::error::ErrorKind),
     #[error("Parser failed at {0} due to {1}")]
-    ConstError(&'a str, &'static str),
+    ErrorKind(&'a str, ErrorKind<'a>),
 }
 
-pub fn const_error<'a>(input: &'a str, reason: &'static str) -> ParseError<'a> {
-    ParseError::ConstError(input, reason)
+#[derive(Error, Debug, Clone)]
+pub enum ErrorKind<'a> {
+    #[error("{0}")]
+    ConstError(&'static str),
+    #[error("undefined parameter {0}")]
+    UndefinedParameterError(&'a str),
+}
+
+impl<'a> ParseError<'a> {
+    pub fn const_error(input: &'a str, reason: &'static str) -> ParseError<'a> {
+        ParseError::ErrorKind(input, ErrorKind::ConstError(reason))
+    }
+    pub fn error_kind(input: &'a str, kind: ErrorKind<'a>) -> ParseError<'a> {
+        ParseError::ErrorKind(input, kind)
+    }
 }
 
 impl<'a> nom::error::ParseError<&'a str> for ParseError<'a> {
     fn from_error_kind(input: &'a str, kind: nom::error::ErrorKind) -> Self {
-        ParseError::ParseError(input, kind)
+        ParseError::NomError(input, kind)
     }
 
     fn append(_input: &'a str, _kind: nom::error::ErrorKind, other: Self) -> Self {
@@ -55,7 +65,7 @@ pub fn slash_comment(input: &str) -> PResult<Vec<&str>> {
     let (input, _): (&str, _) = tag("/*")(input)?;
     let mut end_location = input
         .find("*/")
-        .ok_or_else(|| Err::Error(const_error(input, "comment is unterminated")))?;
+        .ok_or_else(|| Err::Error(ParseError::const_error(input, "comment is unterminated")))?;
 
     match input.find('\n') {
         Some(next_line) if next_line < end_location => {
@@ -106,95 +116,8 @@ enum ArgType {
     Union(Vec<ArgType>),
 }
 
-fn string_literal<'a>(input: &'a str) -> PResult<&'a str> {
-    let double_quote_literal = delimited(
-        tag("\""),
-        fold_many0(
-            (tag("\\").and(take(1usize)).map(|_| ())).or(is_not("\\\"").map(|_| ())),
-            (),
-            |_, _| (),
-        ),
-        tag("\""),
-    );
-    let single_quote_literal = delimited(
-        tag("'"),
-        fold_many0(
-            (tag("\\").and(take(1usize)).map(|_| ())).or(is_not("\\'").map(|_| ())),
-            (),
-            |_, _| (),
-        ),
-        tag("'"),
-    );
-    let (output, _) = alt((single_quote_literal, double_quote_literal))(input)?;
-    Ok((output, &input[..input.len() - output.len()]))
-}
-
 pub fn is_alpha_or_underscore(chr: char) -> bool {
     chr.is_alphanumeric() || chr == '_'
-}
-
-// FIXME normalize sql can't currently handle tags that are right inside of other things
-pub fn normalize_sql<'a>(
-    mut input: &'a str,
-    params_set: &BTreeSet<&str>,
-) -> PResult<'a, Statement> {
-    let mut res = Vec::new();
-
-    let mut cur = String::new();
-
-    while input != "" && &input[0..1] != ";" {
-        let literal = alt((
-            string_literal,
-            take_while1(|chr: char| !chr.is_whitespace() && chr != ';'),
-        ))
-        .map(|res| res)
-        .map(Either::Left);
-
-        let auth = |replace: &'a str| -> PResult<Interp> {
-            let (output, param) =
-                preceded(tag("@auth."), take_while1(is_alpha_or_underscore))(replace)?;
-            Ok((output, Interp::AuthParam(param.to_owned())))
-        }
-        .map(Either::Right);
-
-        let replace = |replace: &'a str| -> PResult<Interp> {
-            let (output, param) = preceded(tag("@"), take_while1(is_alpha_or_underscore))(replace)?;
-            if !params_set.contains(param) {
-                Err(nom::Err::Failure(const_error(
-                    replace,
-                    "undefined parameter",
-                )))?
-            }
-            Ok((output, Interp::Param(param.to_owned())))
-        }
-        .map(Either::Right);
-
-        let (output, interp) =
-            alt((auth, replace, literal, non_empty_space.map(Either::Left)))(input)?;
-        match interp {
-            Either::Left(literal) => {
-                cur.push_str(literal);
-            }
-            Either::Right(interp) => {
-                if cur != "" {
-                    res.push(Interp::Literal(mem::take(&mut cur)));
-                }
-                res.push(interp);
-            }
-        }
-        if input.len() == output.len() {
-            panic!("infinite loop on {}", input);
-        }
-        input = output;
-    }
-    if cur != "" {
-        res.push(Interp::Literal(mem::take(&mut cur)));
-    }
-
-    let (input, _) = delimited(space, opt(tag(";")), space)(input)?;
-
-    res.shrink_to_fit();
-    Ok((input, (Statement(res))))
 }
 
 #[cfg(test)]
@@ -243,23 +166,5 @@ mod tests {
     fn dash_comment_test() {
         let test_str = r#"-- testing "#;
         assert_eq!(dash_comment(test_str).unwrap().1, " testing ");
-    }
-
-    #[test]
-    fn string_literal_test() {
-        let test_str = r#""test" "#;
-        assert_eq!(string_literal(test_str).unwrap(), (" ", r#""test""#));
-    }
-
-    #[test]
-    fn normalize_sql_test() {
-        let map = ["id", "email"].iter().cloned().collect();
-        let test_str =
-            r#"select * from users where id = @id and @email = 'testing 123 @haha' OR 0 = @id"#;
-        let (_, normalized_sql) = normalize_sql(test_str, &map).unwrap();
-        assert_eq!(
-            format!("{:?}", normalized_sql),
-            "Statement([Literal(\"select * from users where id = \"), Param(\"id\"), Literal(\" and \"), Param(\"email\"), Literal(\" = \\\'testing 123 @haha\\\' OR 0 = \"), Param(\"id\")])",
-        );
     }
 }

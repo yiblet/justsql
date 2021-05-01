@@ -20,3 +20,13 @@ pub fn get_cookie_secure() -> bool {
 pub fn get_cookie_http_only() -> bool {
     get_var("COOKIE_HTTP_ONLY").map_or(true, |res| res.parse().unwrap_or(true))
 }
+
+#[macro_export]
+macro_rules! matches_map {
+    ($expression:expr, $( $pattern:pat )|+ $( if $guard: expr )? => $eval:expr ) => {
+        match $expression {
+            $( $pattern )|+ $( if $guard )? => Some ( $eval ),
+            _ => None
+        }
+    }
+}

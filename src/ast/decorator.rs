@@ -11,7 +11,7 @@ use nom::{
 
 use crate::{
     ast::module::AuthSettings,
-    ast::parser::{const_error, dash_comment, slash_comment, space, PResult, ParseError},
+    ast::parser::{dash_comment, slash_comment, space, PResult, ParseError},
 };
 
 use super::parser::is_alpha_or_underscore;
@@ -42,7 +42,8 @@ fn parse_interval(input: &str) -> PResult<f32> {
         None => seconds,
         Some(chr) => {
             seconds
-                * get_multiplier(chr).map_err(|err| nom::Err::Failure(const_error(input, err)))?
+                * get_multiplier(chr)
+                    .map_err(|err| nom::Err::Failure(ParseError::const_error(input, err)))?
         }
     };
     Ok((output, seconds))

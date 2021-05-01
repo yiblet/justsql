@@ -1,8 +1,5 @@
 use crate::{
-    ast::{
-        decorator::Decorator,
-        parser::{const_error, normalize_sql, PResult},
-    },
+    ast::{decorator::Decorator, parser::PResult},
     binding::Binding,
     server::auth::decode,
 };
@@ -12,6 +9,8 @@ use std::{
     fmt::Write,
     path::Path,
 };
+
+use super::{parser::ParseError, sql::parse_sql_statements};
 
 // TODO set up "pre-interpolated" sql type
 #[derive(Debug, Clone, PartialEq)]
@@ -28,7 +27,7 @@ pub enum Interp {
     AuthParam(String),
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Statement(pub Vec<Interp>);
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Copy)]
@@ -123,11 +122,11 @@ impl Module {
         for decorator in decorators.into_iter() {
             match decorator {
                 Decorator::Auth(_) if auth_settings.is_some() => Result::Err(Err::Failure(
-                    const_error(input, "multiple auth declarations detected"),
+                    ParseError::const_error(input, "multiple auth declarations detected"),
                 ))?,
                 Decorator::Auth(val) => auth_settings = Some(val),
                 Decorator::Param(param) if params_set.contains(param) => {
-                    Result::Err(Err::Failure(const_error(
+                    Result::Err(Err::Failure(ParseError::const_error(
                         input,
                         "multiple same parameters declarations detected",
                     )))?
@@ -137,7 +136,7 @@ impl Module {
                     params_set.insert(param);
                 }
                 Decorator::Endpoint(dec) => match endpoint {
-                    Some(_) => Result::Err(Err::Failure(const_error(
+                    Some(_) => Result::Err(Err::Failure(ParseError::const_error(
                         input,
                         "multiple endpoint declarations detected",
                     )))?,
@@ -148,13 +147,14 @@ impl Module {
             }
         }
 
-        let (input, (statements, _)) =
-            many_till(move |input| normalize_sql(input, &params_set), eof)(input)?;
+        let (input, sql) = parse_sql_statements(&params_set)(input)?;
 
-        let sql: Vec<Statement> = statements
-            .into_iter()
-            .filter(|stmt| !stmt.is_empty())
-            .collect();
+        if input != "" {
+            Err(nom::Err::Failure(ParseError::const_error(
+                input,
+                "unexpected token",
+            )))?
+        }
 
         let has_auth = sql
             .iter()
@@ -203,7 +203,7 @@ OR 0 = @id"#;
         let err = Module::parse(test_str).unwrap_err();
         assert_eq!(
             format!("{:?}", &err),
-            "Failure(ConstError(\"@id \\nAND @email = \\\'testing 123 @haha\\\' \\nOR 0 = @id\", \"undefined parameter\"))"
+            "Failure(ErrorKind(\" \\nAND @email = \\\'testing 123 @haha\\\' \\nOR 0 = @id\", UndefinedParameterError(\"id\")))"
         );
 
         let test_str = r#"
@@ -212,14 +212,18 @@ OR 0 = @id"#;
  */
 select * from users 
 where id = @id 
-AND @email = 'testing 123 @haha' 
+AND test(@email) = 'testing 123' 
 OR 0 = @id;
-select * from users 
-where id = @id 
-AND @email = 'testing 123 @haha' 
-OR 0 = @id ;
         "#;
-        let err = Module::parse(test_str).unwrap().0;
-        assert_eq!(err, "");
+        let (input, sql) = Module::parse(test_str).unwrap();
+        assert_eq!(input, "");
+        assert!(sql
+            .sql
+            .iter()
+            .flat_map(|stmt| stmt.0.iter())
+            .all(|interp| match interp {
+                Interp::Literal(lit) => lit.find('@').is_none(),
+                _ => true,
+            }))
     }
 }

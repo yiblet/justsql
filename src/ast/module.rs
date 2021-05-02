@@ -243,8 +243,9 @@ AND @email = 'testing 123 @haha'
 OR 0 = @id"#;
         let err = Module::parse(test_str).unwrap_err();
         assert_eq!(
-            format!("{:?}", &err),
-            "Failure(ErrorKind(\" \\nAND @email = \\\'testing 123 @haha\\\' \\nOR 0 = @id\", UndefinedParameterError(\"id\")))"
+            format!("{:?}", &err)
+            ,
+            "Failure(ErrorKind(\"@id \\nAND @email = \\\'testing 123 @haha\\\' \\nOR 0 = @id\", UndefinedParameterError(\"id\")))"
         );
 
         let test_str = r#"

@@ -7,8 +7,8 @@ use crate::ast::Module;
 
 use super::{importer::Importer, module_collection::ModuleCollection};
 
-#[derive(Debug, Default, Clone)]
-pub struct AsNeededImporter(Arc<Mutex<ModuleCollection>>);
+#[derive(Debug, Default)]
+pub struct AsNeededImporter(Mutex<ModuleCollection>);
 
 impl Importer for AsNeededImporter {
     fn get_module_from_endpoint<'a>(&'a self, endpoint: &str) -> anyhow::Result<Arc<Module>> {

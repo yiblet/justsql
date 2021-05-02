@@ -9,8 +9,8 @@ use super::{
     module_collection::{ModuleCollection, ModuleCollectionError},
 };
 
-#[derive(Debug, Default, Clone)]
-pub struct UpfrontImporter(pub(crate) Arc<ModuleCollection>);
+#[derive(Debug, Default)]
+pub struct UpfrontImporter(pub(crate) ModuleCollection);
 
 impl UpfrontImporter {
     pub fn from_glob(
@@ -31,7 +31,7 @@ impl UpfrontImporter {
             return Ok(Either::Right(errors));
         }
 
-        Ok(Either::Left(Self(Arc::new(modules))))
+        Ok(Either::Left(Self(modules)))
     }
 }
 

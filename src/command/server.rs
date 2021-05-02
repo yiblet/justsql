@@ -75,7 +75,7 @@ async fn root() -> impl Responder {
 async fn auth_query<I: Importer>(
     req: HttpRequest,
     data: web::Json<Query>,
-    evaluator: web::Data<Evaluator<I>>,
+    evaluator: web::Data<Evaluator>,
     pool: web::Data<PgPool>,
 ) -> impl Responder {
     enum ReturnType {
@@ -212,7 +212,7 @@ async fn auth_query<I: Importer>(
 async fn run_queries<I: Importer>(
     req: HttpRequest,
     data: web::Json<Vec<Query>>,
-    evaluator: web::Data<Evaluator<I>>,
+    evaluator: web::Data<Evaluator>,
     pool: web::Data<PgPool>,
 ) -> impl Responder {
     let cookie = req.cookie(COOKIE_NAME);

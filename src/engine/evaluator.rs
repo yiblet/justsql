@@ -5,16 +5,18 @@ use crate::ast::{Module, ParamType};
 use super::importer::Importer;
 
 #[derive(Debug, Clone)]
-pub struct Evaluator<I: Importer> {
-    importer: I,
+pub struct Evaluator {
+    importer: Arc<dyn Importer>,
 }
 
-impl<I: Importer + Send + Sync + 'static + Clone> Evaluator<I> {
-    pub fn with_importer(importer: I) -> Evaluator<I>
+impl Evaluator {
+    pub fn with_importer<I>(importer: I) -> Evaluator
     where
-        I: Importer + Send + Sync + 'static,
+        I: Importer,
     {
-        Self { importer }
+        Self {
+            importer: Arc::new(importer),
+        }
     }
 
     pub fn endpoint(&self, endpoint: &str) -> anyhow::Result<Arc<Module>> {

@@ -9,6 +9,7 @@ use std::{
     fmt::Write,
     path::Path,
 };
+use thiserror::Error;
 
 use super::{parser::ParseError, sql::parse_sql_statements};
 
@@ -83,6 +84,22 @@ impl Statement {
     }
 }
 
+#[derive(Error, Debug)]
+pub enum ModuleError {
+    #[error("{0}")]
+    IOError(#[from] std::io::Error),
+    #[error("{error}")]
+    ParseError {
+        file: String,
+        pos: usize,
+        error: String,
+    },
+    #[error("unexpected token")]
+    NomParseError { file: String, pos: usize },
+    #[error("file is incomplete")]
+    Incomplete,
+}
+
 // TODO set up "pre-interpolated" sql type
 #[derive(Debug, Clone, Default)]
 pub struct Module {
@@ -104,15 +121,35 @@ impl Module {
         Ok(None)
     }
 
-    pub fn from_path<A: AsRef<Path>>(input: A) -> anyhow::Result<Module> {
+    pub fn from_path<A: AsRef<Path>>(input: A) -> Result<Module, ModuleError> {
         use std::io::prelude::*;
         let path = input.as_ref();
         let mut file = std::fs::File::open(path)?;
         let mut file_content = String::with_capacity(file.metadata()?.len() as usize);
         file.read_to_string(&mut file_content)?;
-        let (_, data) =
-            Module::parse(file_content.as_str()).map_err(|err| anyhow!("{}", err.to_string()))?;
-        Ok(data)
+
+        return match Module::parse(file_content.as_str()) {
+            Ok((_, res)) => Ok(res),
+            Err(nom::Err::Incomplete(_)) => Err(ModuleError::Incomplete),
+            Err(nom::Err::Failure(ParseError::NomError(input, _)))
+            | Err(nom::Err::Error(ParseError::NomError(input, _))) => {
+                let pos = file_content.len() - input.len();
+                Err(ModuleError::NomParseError {
+                    file: file_content,
+                    pos,
+                })
+            }
+            Err(nom::Err::Failure(ParseError::ErrorKind(input, kind)))
+            | Err(nom::Err::Error(ParseError::ErrorKind(input, kind))) => {
+                let pos = file_content.len() - input.len();
+                let error = format!("{}", kind);
+                Err(ModuleError::ParseError {
+                    file: file_content,
+                    pos,
+                    error,
+                })
+            }
+        };
     }
 
     pub fn parse(input: &str) -> PResult<Self> {

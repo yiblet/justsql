@@ -1,21 +1,25 @@
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, fmt::Write};
 
 use actix_web::{
     cookie::Cookie, middleware, web, App, HttpRequest, HttpResponse, HttpServer, Responder,
 };
 use clap::Clap;
 
+use either::Either;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sqlx::{postgres::PgArguments, PgPool, Postgres};
 
 use crate::{
-    ast::AuthSettings,
+    ast::{AuthSettings, ModuleError},
     binding::bindings_from_json,
-    engine::{Evaluator, Importer, UpfrontImporter},
+    engine::{Evaluator, Importer, ModuleCollectionError, UpfrontImporter},
     query::build_queries,
     row_type::{convert_row, RowType},
-    util::{get_cookie_domain, get_cookie_http_only, get_cookie_secure},
+    util::{
+        env::{get_cookie_domain, get_cookie_http_only, get_cookie_secure},
+        error_printing::{print_error, print_unpositioned_error},
+    },
 };
 
 use super::{Command, Opts};
@@ -294,15 +298,54 @@ impl Command for Server {
     }
 }
 
-pub async fn run_server(cmd: Server) -> anyhow::Result<()> {
-    let uri = crate::util::get_var("POSTGRES_URL")?;
+fn print_module_collection_error<W: Write>(
+    writer: &mut W,
+    err: &ModuleCollectionError,
+    file_name: &str,
+) -> anyhow::Result<()> {
+    match err {
+        ModuleCollectionError::AlreadyUsedEndpointError(_) => {
+            print_unpositioned_error(writer, err.to_string().as_ref(), file_name)?
+        }
+        ModuleCollectionError::ModuleError(err) => match err {
+            ModuleError::IOError(_) | ModuleError::Incomplete => {
+                print_unpositioned_error(writer, err.to_string().as_ref(), file_name)?
+            }
+            ModuleError::ParseError { file, pos, .. }
+            | ModuleError::NomParseError { file, pos } => print_error(
+                writer,
+                file.as_str(),
+                *pos,
+                err.to_string().as_str(),
+                file_name,
+            )?,
+        },
+    };
+    Ok(())
+}
 
+pub async fn run_server(cmd: Server) -> anyhow::Result<()> {
+    // import all files
+    let importer = match UpfrontImporter::from_glob(cmd.glob.as_str())? {
+        Either::Left(importer) => importer,
+        Either::Right(errors) => {
+            let mut buffer = String::new();
+            let plural = if errors.len() > 1 { "s" } else { "" };
+            eprint!("errors in the following file{}: \n", plural);
+            for (error, file_name) in errors {
+                print_module_collection_error(&mut buffer, &error, file_name.as_str())?;
+                eprint!("{}\n", buffer);
+                buffer.clear();
+            }
+            return Err(anyhow!("failed to import some sql files"));
+        }
+    };
+
+    let uri = crate::util::env::get_var("POSTGRES_URL")?;
     let pool = sqlx::postgres::PgPoolOptions::new()
         .max_connections(cmd.max_connections)
         .connect(uri.as_str())
         .await?;
-
-    let importer = UpfrontImporter::from_glob(cmd.glob.as_str())?;
 
     for (endpoint, _) in importer.0.endpoints.iter() {
         info!("using endpoint {}", endpoint)
@@ -330,6 +373,5 @@ pub async fn run_server(cmd: Server) -> anyhow::Result<()> {
     .run()
     .await?;
 
-    let res: anyhow::Result<_> = Ok(());
-    res
+    Ok(())
 }

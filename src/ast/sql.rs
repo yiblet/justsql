@@ -91,13 +91,13 @@ fn parse_token<'b, 'a: 'b>(
     move |input: &'a str| {
         let auth_param = preceded(tag("@auth."), lex_word).map(AuthParam);
 
-        let param = (move |input: &'a str| {
-            let (input, word) = lex_at_word(input)?;
+        let param = (move |og_input: &'a str| {
+            let (input, word) = lex_at_word(og_input)?;
             if params_set.contains(word) {
                 Ok((input, word))
             } else {
                 Err(nom::Err::Failure(ParseError::error_kind(
-                    input,
+                    og_input,
                     ErrorKind::UndefinedParameterError(word),
                 )))?
             }

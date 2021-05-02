@@ -67,7 +67,7 @@ impl Command for Run {
                 .build()
                 .unwrap()
                 .block_on(async {
-                    let uri = crate::util::get_var("POSTGRES_URL")?;
+                    let uri = crate::util::env::get_var("POSTGRES_URL")?;
                     let pool = sqlx::postgres::PgPoolOptions::new()
                         .max_connections(1)
                         .connect(uri.as_str())

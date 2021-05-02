@@ -1,34 +1,37 @@
 use std::{path::Path, sync::Arc};
 
+use either::Either;
+
 use crate::ast::Module;
 
-use super::{importer::Importer, module_collection::ModuleCollection};
+use super::{
+    importer::Importer,
+    module_collection::{ModuleCollection, ModuleCollectionError},
+};
 
 #[derive(Debug, Default, Clone)]
 pub struct UpfrontImporter(pub(crate) Arc<ModuleCollection>);
 
 impl UpfrontImporter {
-    pub fn from_glob(glob: &str) -> anyhow::Result<Self> {
+    pub fn from_glob(
+        glob: &str,
+    ) -> anyhow::Result<Either<Self, Vec<(ModuleCollectionError, String)>>> {
         let mut modules = ModuleCollection::default();
 
         let mut errors = vec![];
         for file in glob::glob(glob)? {
             let file = file?;
             if let Err(err) = modules.insert(file.clone()) {
-                errors.push(anyhow!(
-                    "error in {:?}\n{}",
-                    file.as_path().as_os_str(),
-                    err
-                ))
+                let file_str = file.to_string_lossy().as_ref().to_owned();
+                errors.push((err, file_str));
             }
         }
 
         if errors.len() != 0 {
-            let err: Vec<String> = errors.into_iter().map(|err| err.to_string()).collect();
-            return Err(anyhow!("{}", err.join("\n")));
+            return Ok(Either::Right(errors));
         }
 
-        Ok(Self(Arc::new(modules)))
+        Ok(Either::Left(Self(Arc::new(modules))))
     }
 }
 

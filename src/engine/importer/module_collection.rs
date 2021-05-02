@@ -1,6 +1,14 @@
+use crate::ast::{Module, ModuleError};
 use std::{collections::BTreeMap, path::PathBuf, sync::Arc};
+use thiserror::Error;
 
-use crate::ast::Module;
+#[derive(Error, Debug)]
+pub enum ModuleCollectionError {
+    #[error("endpoint {0} already in use")]
+    AlreadyUsedEndpointError(String),
+    #[error("{0}")]
+    ModuleError(#[from] ModuleError),
+}
 
 #[derive(Default, Debug)]
 pub struct ModuleCollection {
@@ -9,16 +17,14 @@ pub struct ModuleCollection {
 }
 
 impl ModuleCollection {
-    pub fn insert(&mut self, location: PathBuf) -> anyhow::Result<()> {
+    pub fn insert(&mut self, location: PathBuf) -> Result<(), ModuleCollectionError> {
         let module = Arc::new(Module::from_path(&location)?);
 
         // insert module endpoint
         if let Some(endpoint) = module.endpoint.as_ref() {
             if self.endpoints.contains_key(endpoint) {
-                Err(anyhow!(
-                    "failed importing {} endpoint {} is already in use",
-                    location.as_path().to_string_lossy(),
-                    endpoint
+                Err(ModuleCollectionError::AlreadyUsedEndpointError(
+                    endpoint.to_owned(),
                 ))?
             };
             self.endpoints.insert(endpoint.to_owned(), module.clone());

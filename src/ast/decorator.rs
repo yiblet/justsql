@@ -1,6 +1,7 @@
+use either::Either;
 use nom::{
     branch::alt,
-    bytes::complete::{tag, take, take_until, take_while},
+    bytes::complete::{tag, take_while},
     character::complete::one_of,
     combinator::opt,
     multi::fold_many0,
@@ -11,10 +12,13 @@ use nom::{
 
 use crate::{
     ast::module::AuthSettings,
-    ast::parser::{dash_comment, slash_comment, space, PResult, ParseError},
+    ast::parser::{space, PResult, ParseError},
 };
 
-use super::parser::is_alpha_or_underscore;
+use super::parser::{
+    is_alpha_or_underscore, line_space0, line_space1, with_multi_line_comment,
+    with_single_line_comment,
+};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Decorator<'a> {
@@ -86,45 +90,39 @@ where
     P: Parser<&'a str, A, ParseError<'a>>,
 {
     delimited(
-        space.and(tag("@")).and(tag(decorator)).and(space),
+        line_space0
+            .and(tag("@"))
+            .and(tag(decorator))
+            .and(line_space1),
         parser,
-        opt(take_until("\n").and(take("\n".len()))),
+        line_space0,
     )
 }
 
 // TODO do not permit decorators with stuff after that isn't a space
 pub fn frontmatter<'a>(input: &'a str) -> PResult<Vec<Decorator<'a>>> {
-    enum Either<A> {
-        Many(Vec<A>),
-        One(A),
-    }
-
-    let (input, comments) = fold_many0(
+    let (input, decorators) = fold_many0(
         delimited(
             space,
             alt((
-                dash_comment.map(Either::One),
-                slash_comment.map(Either::Many),
+                with_multi_line_comment(Decorator::parse).map(Either::Left),
+                with_single_line_comment(Decorator::parse).map(Either::Right),
             )),
             space,
         ),
         vec![],
-        |mut acc, item: Either<&str>| match item {
-            Either::Many(item) => {
+        |mut acc, item| match item {
+            Either::Left(item) => {
                 acc.extend(item.into_iter());
                 acc
             }
-            Either::One(item) => {
+            Either::Right(Some(item)) => {
                 acc.push(item);
                 acc
             }
+            Either::Right(None) => acc,
         },
     )(input)?;
-
-    let decorators: Vec<Decorator<'a>> = comments
-        .into_iter()
-        .filter_map(|comment| Some(Decorator::parse(comment).ok()?.1))
-        .collect();
 
     Ok((input, decorators))
 }
@@ -181,13 +179,37 @@ select * from users;
 
         let test_str = r#"
 -- testing 
---
+-- @param testing
+-- testing
 -- @param users
+-- @param testing testing
+select * from users;
+"#;
+        assert!(frontmatter(test_str).is_err(),);
+
+        let test_str = r#"
+/* @endpoint getUser 
+ * @param users */
 select * from users;
 "#;
         assert_eq!(
             frontmatter(test_str).unwrap(),
-            ("select * from users;\n", vec![Decorator::Param("users")])
+            (
+                "select * from users;\n",
+                vec![Decorator::Endpoint("getUser"), Decorator::Param("users")]
+            )
         );
+
+        let test_str = r#"
+/* @endpoint getUser 
+ * @param users users
+ * user */
+select * from users;
+"#;
+        let err = frontmatter(test_str).unwrap_err();
+        assert!(match err {
+            nom::Err::Failure(ParseError::NomError(v, _)) => v.starts_with("users\n"),
+            _ => panic!("{}", err),
+        });
     }
 }

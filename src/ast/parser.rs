@@ -1,7 +1,8 @@
 use nom::{
-    bytes::complete::{is_not, tag, take, take_until, take_while},
-    combinator::opt,
-    sequence::{preceded, terminated},
+    bytes::complete::{tag, take_till, take_while},
+    character::complete::satisfy,
+    combinator::{cut, eof, opt, peek},
+    multi::separated_list0,
     Err, IResult, Parser,
 };
 
@@ -44,59 +45,136 @@ impl<'a> nom::error::ParseError<&'a str> for ParseError<'a> {
 
 pub type PResult<'a, O> = IResult<&'a str, O, ParseError<'a>>;
 
-pub fn space(input: &str) -> PResult<&str> {
-    opt(take_while(|chr: char| chr.is_whitespace()))(input)
-        .map(|(input, val)| (input, val.unwrap_or("")))
+// all space character except for new lines
+pub fn line_space0(input: &str) -> PResult<&str> {
+    take_while(|c: char| c.is_whitespace() && c != '\n').parse(input)
 }
 
-pub fn dash_comment(input: &str) -> PResult<&str> {
-    preceded(tag("--"), opt(is_not("\n")))
-        .map(|val| val.unwrap_or(""))
+// all space character except for new lines
+pub fn line_space1(input: &str) -> PResult<&str> {
+    take_while::<_, _, ParseError>(|c: char| c.is_whitespace() && c != '\n')
         .parse(input)
+        .map_err(|_| {
+            Err::Error(ParseError::const_error(
+                input,
+                "must have at least one space",
+            ))
+        })
 }
 
-pub fn slash_comment(input: &str) -> PResult<Vec<&str>> {
-    let (input, _): (&str, _) = tag("/*")(input)?;
-    let mut end_location = input
-        .find("*/")
-        .ok_or_else(|| Err::Error(ParseError::const_error(input, "comment is unterminated")))?;
+pub fn space(input: &str) -> PResult<&str> {
+    take_while(|chr: char| chr.is_whitespace())(input)
+}
 
-    match input.find('\n') {
-        Some(next_line) if next_line < end_location => {
-            // multi line comment
-            let (mut input, first_line) = is_not("\n")(input)?;
-            let mut res = vec![first_line];
-            end_location = input.find("*/").unwrap();
-            input = &input[1..];
-            // while we we're not in the line with the "*/"
-
-            while input.find('\n').map_or(false, |val| val < end_location) {
-                // skip until * parse until */
-                let (og_input, val) = preceded(preceded(space, tag("*")), is_not("\n"))(input)?;
-                res.push(val);
-                input = &og_input[1..]; // skip the '\n'
-                end_location = input.find("*/").unwrap();
-            }
-
-            let (input, final_line_opt) = terminated(
-                preceded(space.and(tag("*")), take_until("*/"))
-                    .map(Some)
-                    .or(take_until("*/").map(|_| None)),
-                take("*/".len()),
-            )
+///  parses decorator inside single line comment
+///  examples:
+///     -- <parser>
+///     // <parser>
+pub fn with_single_line_comment<'a, P, O>(
+    mut parser: P,
+) -> impl FnMut(&'a str) -> PResult<Option<O>>
+where
+    P: Parser<&'a str, O, ParseError<'a>>,
+{
+    move |input: &'a str| {
+        let (input, _) = tag("--").or(tag("//")).and(line_space0).parse(input)?;
+        let (input, output) = (|i| parser.parse(i))
+            .map(Some)
+            .or(take_till(|c| c == '\n').map(|_| None))
             .parse(input)?;
+        let (input, _) = cut(line_space0.and(
+            nom::character::complete::char('\n')
+                .map(|_| ())
+                .or(eof.map(|_| ())),
+        ))
+        .parse(input)?;
+        Ok((input, output))
+    }
+}
 
-            if let Some(final_line) = final_line_opt {
-                res.push(final_line)
+/// parsers decorator inside multi-line comment
+/// tests for:
+///     /* <parser> */
+///     /*
+///      * <parser> */,
+///
+///     /* <parser>
+///      * <parser>
+///      */
+///
+///     /* <parser>
+///        <parser>
+///      */
+
+pub fn with_multi_line_comment<'a, P, O>(mut parser: P) -> impl FnMut(&'a str) -> PResult<Vec<O>>
+where
+    P: Parser<&'a str, O, ParseError<'a>>,
+{
+    fn start(input: &str) -> PResult<()> {
+        tag("/*").and(line_space0).map(|_| ()).parse(input)
+    }
+    fn line_end(input: &str) -> PResult<()> {
+        line_space0
+            .and(nom::character::complete::char('\n'))
+            .map(|_| ())
+            .parse(input)
+    }
+    fn sep(input: &str) -> PResult<()> {
+        tag("*")
+            .and(peek(satisfy(|c: char| c != '/')))
+            .map(|_| ())
+            .parse(input)
+    }
+
+    fn inactive_comment(input: &str) -> PResult<()> {
+        let mut prev = None;
+        let mut pos = None;
+        for (idx, chr) in input.char_indices() {
+            match (prev, chr) {
+                (_, '\n') => {
+                    pos = Some(idx);
+                    break;
+                }
+                (Some((idx_prev, '*')), '/') => {
+                    pos = Some(idx_prev);
+                    break;
+                }
+                _ => prev = Some((idx, chr)),
             }
+        }
 
-            Ok((input, res))
-        }
-        _ => {
-            // single line comment
-            let (comment_string, rest) = input.split_at(end_location);
-            Ok((&rest[2..], vec![comment_string]))
-        }
+        let (_, rest) = input.split_at(pos.ok_or_else(|| {
+            Err::Error(ParseError::const_error(
+                input,
+                "couldn't find end of comment line",
+            ))
+        })?);
+        Ok((rest, ()))
+    }
+
+    let mut delimiter = line_end
+        .and(line_space0.and(opt(sep)).and(line_space0))
+        .map(|_| ());
+
+    // allows for the following different terminations:
+    // ' \n * */'
+    // ' \n */'
+    // '  */'
+    let mut end = opt(line_end)
+        .and(line_space0)
+        .and(opt(sep.and(space)))
+        .and(tag("*/"));
+
+    move |input: &'a str| {
+        let (input, _) = start.parse(input)?;
+        let (input, res): (&'a str, Vec<Option<O>>) = separated_list0(
+            |c| delimiter.parse(c),
+            (|c| parser.parse(c))
+                .map(Some)
+                .or(inactive_comment.map(|_| None)),
+        )(input)?;
+        let (input, _) = cut(|c| end.parse(c)).parse(input)?;
+        Ok((input, res.into_iter().filter_map(|c| c).collect()))
     }
 }
 
@@ -116,49 +194,61 @@ pub fn is_alpha_or_underscore(chr: char) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use nom::sequence::delimited;
+
     use super::*;
 
     #[test]
-    fn slash_comment_test() {
-        let test_str = r#"/* testing
-                           * testing
-                           * testing
-                           * testing 
-                           * */ testing"#;
+    fn space_test() {
+        assert_eq!(space("").unwrap().1, "");
 
-        assert_eq!(slash_comment(test_str).unwrap().0, " testing",);
-
-        let test_str = r#"/* testing
-                           * testing
-                           * testing
-                           * testing */"#;
-
-        assert_eq!(
-            slash_comment(test_str)
-                .unwrap()
-                .1
-                .iter()
-                .map(|v| v.trim())
-                .collect::<Vec<_>>(),
-            vec!["testing"; 4]
-        );
-
-        let test_str = r#"/* testing */ "#;
-
-        assert_eq!(
-            slash_comment(test_str)
-                .unwrap()
-                .1
-                .iter()
-                .map(|v| v.trim())
-                .collect::<Vec<_>>(),
-            vec!["testing"; 1]
-        );
+        assert_eq!(space(" ").unwrap().1, " ");
+        assert_eq!(space(" \tw").unwrap().1, " \t");
     }
 
     #[test]
-    fn dash_comment_test() {
+    fn with_single_line_comment_test() {
+        let mut parser = delimited(space, with_single_line_comment(tag("testing")), space);
         let test_str = r#"-- testing "#;
-        assert_eq!(dash_comment(test_str).unwrap().1, " testing ");
+        assert!(parser.parse(test_str).unwrap().0 == "");
+    }
+
+    #[test]
+    fn with_multi_line_comment_test() {
+        let test_str = r#"
+        /* testing */
+"#;
+        let mut parser = delimited(space, with_multi_line_comment(tag("testing")), space);
+        assert_eq!(parser.parse(test_str).unwrap().1.len(), 1);
+
+        let test_str = r#"
+        /* testing
+         *
+         * not_testing
+         * testing */
+"#;
+        assert_eq!(parser.parse(test_str).unwrap().1.len(), 2);
+
+        let test_str = r#"
+        /* testing
+           testing */
+"#;
+        assert_eq!(parser.parse(test_str).unwrap().1.len(), 2);
+
+        let test_str = r#"
+        /* testing
+         * testing
+           testing 
+         * testing 
+         * */
+"#;
+        assert_eq!(parser.parse(test_str).unwrap().1.len(), 4);
+    }
+
+    #[test]
+    fn separated_list_test() {
+        let mut parser = separated_list0(tag(",").and(space), tag("t"));
+        assert!(parser.parse("t, t").is_ok());
+        assert!(parser.parse("t, t,").is_ok());
     }
 }

@@ -1,17 +1,12 @@
 ## Important
 
-- enable access to auth context when querying 
-- simplify module abstractions
-    * [ ] create evaluators
-    * [ ] create engines 
-    * [ ] simplify modules
+- enable returning more complicated postgres types
 
 ## Backlog
 
 - add more tests 
-- enable returning more complicated postgres types
-- add endpoint versioning for seamless migrations
-- split server endpoints up to a full directory
+- enable watching for changes
 
 ## Minor
 
+- add endpoint versioning for seamless migrations

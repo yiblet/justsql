@@ -41,6 +41,18 @@ impl Importer for AsNeededImporter {
             }
         }
     }
+
+    fn get_all_endpoints(&self) -> anyhow::Result<Vec<String>> {
+        let res = self
+            .0
+            .lock()
+            .map_err(|_| anyhow!("ModuleCollection was poisened"))?
+            .endpoints
+            .keys()
+            .cloned()
+            .collect();
+        Ok(res)
+    }
 }
 
 #[cfg(test)]

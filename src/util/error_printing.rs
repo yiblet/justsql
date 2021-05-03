@@ -1,6 +1,21 @@
-use std::fmt::Write;
+use std::{error::Error, fmt::Write};
+use thiserror::Error;
 
-fn line_pad<W: Write>(writer: &mut W, row: usize, include_line: bool) -> anyhow::Result<()> {
+pub trait PrintableError: Error {
+    fn print_error<W: Write>(&self, writer: &mut W, file_name: &str) -> Result<(), PrintError>;
+}
+
+#[derive(Error, Debug)]
+pub enum PrintError {
+    #[error(transparent)]
+    FormatError(#[from] std::fmt::Error),
+    #[error("could not find error position")]
+    MissingPositionError,
+    #[error("could not find line")]
+    MissingLineError,
+}
+
+fn line_pad<W: Write>(writer: &mut W, row: usize, include_line: bool) -> Result<(), PrintError> {
     let positions = (row as f64).log10().floor() as usize + 1;
     if include_line {
         write!(writer, "{: >width$} |", row, width = positions)?;
@@ -10,7 +25,7 @@ fn line_pad<W: Write>(writer: &mut W, row: usize, include_line: bool) -> anyhow:
     Ok(())
 }
 
-fn file_name_pad<W: Write>(writer: &mut W, row: usize) -> anyhow::Result<()> {
+fn file_name_pad<W: Write>(writer: &mut W, row: usize) -> Result<(), PrintError> {
     let positions = (row as f64).log10().floor() as usize + 1;
     write!(writer, "{: >width$}{}", "", "-->", width = positions)?;
     Ok(())
@@ -20,7 +35,7 @@ pub fn print_unpositioned_error<W: Write>(
     writer: &mut W,
     explanation: &str,
     file_name: &str,
-) -> anyhow::Result<()> {
+) -> Result<(), PrintError> {
     file_name_pad(writer, 1)?;
     write!(writer, " {}\n", file_name)?;
 
@@ -35,7 +50,7 @@ pub fn print_error<W: Write>(
     position: usize,
     explanation: &str,
     file_name: &str,
-) -> anyhow::Result<()> {
+) -> Result<(), PrintError> {
     let (row, col, _) = file
         .char_indices()
         .scan((1usize, 0usize), |pos, (idx, chr)| {
@@ -47,11 +62,11 @@ pub fn print_error<W: Write>(
         })
         .skip_while(|(_, _, idx)| *idx < position)
         .next()
-        .ok_or_else(|| anyhow!("could not find error position"))?;
+        .ok_or_else(|| PrintError::MissingPositionError)?;
 
     let line = file
         .get(position - col + 1..)
-        .ok_or_else(|| anyhow!("could not find line"))?;
+        .ok_or_else(|| PrintError::MissingLineError)?;
     let line = &line[0..line.find('\n').unwrap_or(line.len())];
 
     file_name_pad(writer, row)?;

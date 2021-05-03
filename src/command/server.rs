@@ -1,24 +1,23 @@
-use std::{collections::BTreeMap, fmt::Write};
+use std::collections::BTreeMap;
 
 use actix_web::{
     cookie::Cookie, middleware, web, App, HttpRequest, HttpResponse, HttpServer, Responder,
 };
 use clap::Clap;
 
-use either::Either;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sqlx::{postgres::PgArguments, PgPool, Postgres};
 
 use crate::{
-    ast::{AuthSettings, ModuleError},
+    ast::AuthSettings,
     binding::bindings_from_json,
-    engine::{Evaluator, Importer, ModuleCollectionError, UpfrontImporter},
+    engine::{Evaluator, Importer, UpfrontImporter, WatchingImporter},
     query::build_queries,
     row_type::{convert_row, RowType},
     util::{
         env::{get_cookie_domain, get_cookie_http_only, get_cookie_secure},
-        error_printing::{print_error, print_unpositioned_error},
+        error_printing::PrintableError,
     },
 };
 
@@ -28,7 +27,7 @@ use super::{Command, Opts};
 #[derive(Clap, Clone)]
 pub struct Server {
     /// directory use for server
-    glob: String,
+    directory: String,
 
     #[clap(short, long, default_value = "2332")]
     port: usize,
@@ -38,6 +37,9 @@ pub struct Server {
 
     #[clap(short, long, default_value = "sql")]
     extension: String,
+
+    #[clap(short, long)]
+    watch: bool,
 }
 
 // TODO currently can only send over simplistic types
@@ -298,48 +300,31 @@ impl Command for Server {
     }
 }
 
-fn print_module_collection_error<W: Write>(
-    writer: &mut W,
-    err: &ModuleCollectionError,
-    file_name: &str,
-) -> anyhow::Result<()> {
-    match err {
-        ModuleCollectionError::AlreadyUsedEndpointError(_) => {
-            print_unpositioned_error(writer, err.to_string().as_ref(), file_name)?
-        }
-        ModuleCollectionError::ModuleError(err) => match err {
-            ModuleError::IOError(_) | ModuleError::Incomplete => {
-                print_unpositioned_error(writer, err.to_string().as_ref(), file_name)?
-            }
-            ModuleError::ParseError { file, pos, .. }
-            | ModuleError::NomParseError { file, pos } => print_error(
-                writer,
-                file.as_str(),
-                *pos,
-                err.to_string().as_str(),
-                file_name,
-            )?,
-        },
-    };
-    Ok(())
-}
-
-pub async fn run_server(cmd: Server) -> anyhow::Result<()> {
-    // import all files
-    let importer = match UpfrontImporter::from_glob(cmd.glob.as_str())? {
-        Either::Left(importer) => importer,
-        Either::Right(errors) => {
+fn create_evaluator(directory: &str, extension: &str, watch: bool) -> anyhow::Result<Evaluator> {
+    if watch {
+        let importer = WatchingImporter::new(directory, extension)?;
+        Ok(Evaluator::with_importer(importer))
+    } else {
+        let (importer, errors) = UpfrontImporter::new(directory, extension)?;
+        if errors.len() != 0 {
             let mut buffer = String::new();
             let plural = if errors.len() > 1 { "s" } else { "" };
             eprint!("errors in the following file{}: \n", plural);
-            for (error, file_name) in errors {
-                print_module_collection_error(&mut buffer, &error, file_name.as_str())?;
+            for (file_name, error) in errors {
+                error.print_error(&mut buffer, file_name.as_str())?;
                 eprint!("{}\n", buffer);
                 buffer.clear();
             }
             return Err(anyhow!("failed to import some sql files"));
+        } else {
+            Ok(Evaluator::with_importer(importer))
         }
-    };
+    }
+}
+
+pub async fn run_server(cmd: Server) -> anyhow::Result<()> {
+    // import all files
+    let evaluator = create_evaluator(cmd.directory.as_str(), cmd.extension.as_str(), cmd.watch)?;
 
     let uri = crate::util::env::get_var("POSTGRES_URL")?;
     let pool = sqlx::postgres::PgPoolOptions::new()
@@ -347,11 +332,9 @@ pub async fn run_server(cmd: Server) -> anyhow::Result<()> {
         .connect(uri.as_str())
         .await?;
 
-    for (endpoint, _) in importer.0.endpoints.iter() {
+    for endpoint in evaluator.importer.get_all_endpoints()? {
         info!("using endpoint {}", endpoint)
     }
-
-    let evaluator = Evaluator::with_importer(importer);
 
     HttpServer::new(move || {
         App::new()

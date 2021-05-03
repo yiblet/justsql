@@ -34,3 +34,7 @@ jsonwebtoken = "7"
 path-clean = "0.1"
 either = "1.6"
 log = "0.4"
+
+walkdir = "2"
+notify = "4.0"
+im = "15"

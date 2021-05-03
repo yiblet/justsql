@@ -6,7 +6,7 @@ use super::importer::Importer;
 
 #[derive(Debug, Clone)]
 pub struct Evaluator {
-    importer: Arc<dyn Importer>,
+    pub(crate) importer: Arc<dyn Importer>,
 }
 
 impl Evaluator {

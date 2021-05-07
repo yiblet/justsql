@@ -28,7 +28,7 @@ impl Command for Run {
     fn run_command(&self, _opt: &Opts) -> anyhow::Result<()> {
         let args = parse_args(self.args.iter().map(String::as_str))?;
 
-        let module = Module::from_path(&self.module)?;
+        let module = Module::from_path(&self.module).context("failed to find file")?;
         if args.len() != module.params.len()
             || !module
                 .params

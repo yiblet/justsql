@@ -1,5 +1,6 @@
 use std::{borrow::Cow, env, fs::File};
 
+use anyhow::Context;
 use serde::{Deserialize, Serialize};
 
 use super::{env_value::EnvValue, secret::Secret};
@@ -92,36 +93,39 @@ impl Default for Cookie {
 impl Config {
     /// read config from env
     pub fn read_config() -> anyhow::Result<Config> {
-        let mut cur = env::current_dir()?;
-        loop {
-            // check first if the .yaml file exists
-            cur.push("justsql.config.yaml");
-            let is_file = cur.as_path().metadata().map_or(false, |m| m.is_file());
-            if is_file {
-                break;
-            }
-            cur.pop();
+        let run = || {
+            let mut cur = env::current_dir()?;
+            loop {
+                // check first if the .yaml file exists
+                cur.push("justsql.config.yaml");
+                let is_file = cur.as_path().metadata().map_or(false, |m| m.is_file());
+                if is_file {
+                    break;
+                }
+                cur.pop();
 
-            // else check if the .yml file exists
-            cur.push("justsql.config.yml");
-            let is_file = cur.as_path().metadata().map_or(false, |m| m.is_file());
-            if is_file {
-                break;
-            }
-            cur.pop();
+                // else check if the .yml file exists
+                cur.push("justsql.config.yml");
+                let is_file = cur.as_path().metadata().map_or(false, |m| m.is_file());
+                if is_file {
+                    break;
+                }
+                cur.pop();
 
-            if !cur.pop() {
-                return Err(anyhow!(
+                if !cur.pop() {
+                    return Err(anyhow!(
                     "could not find or open a justsql.config.yaml file in current or parent directories"
                 ));
+                }
             }
-        }
 
-        let file = File::open(&cur)?;
-        let mut config: Config = serde_yaml::from_reader(file)?;
-        if let Some(secret) = config.auth.as_mut() {
-            secret.post_process()?
-        }
-        Ok(config)
+            let file = File::open(&cur)?;
+            let mut config: Config = serde_yaml::from_reader(file)?;
+            if let Some(secret) = config.auth.as_mut() {
+                secret.post_process()?
+            }
+            Ok(config)
+        };
+        run().context("failed to read config file")
     }
 }

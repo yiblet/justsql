@@ -1,3 +1,7 @@
+// minimal client 
+// assumes justsql is routed to the /justsql path on the 
+// same endpoint as this system.
+
 export type Resp<A> =
     | {
         status: "error";

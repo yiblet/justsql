@@ -12,6 +12,7 @@ path = "src/main.rs"
 [dependencies]
 serde = "1.0"
 serde_json = "1.0"
+serde_yaml = "0.8.17"
 nom = {version = "6.1", features = ["alloc", "regexp"]}
 thiserror = "1"
 regex = "1.4"
@@ -38,3 +39,5 @@ log = "0.4"
 walkdir = "2"
 notify = "4.0"
 im = "15"
+base64 = "0.13"
+dotenv = "0.15"

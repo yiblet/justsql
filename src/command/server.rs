@@ -1,8 +1,6 @@
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, sync::Arc};
 
-use actix_web::{
-    cookie::Cookie, middleware, web, App, HttpRequest, HttpResponse, HttpServer, Responder,
-};
+use actix_web::{middleware, web, App, HttpRequest, HttpResponse, HttpServer, Responder};
 use clap::Clap;
 
 use serde::{Deserialize, Serialize};
@@ -12,13 +10,11 @@ use sqlx::{postgres::PgArguments, PgPool, Postgres};
 use crate::{
     ast::AuthSettings,
     binding::bindings_from_json,
+    config::Config,
     engine::{Evaluator, Importer, UpfrontImporter, WatchingImporter},
     query::build_queries,
     row_type::{convert_row, RowType},
-    util::{
-        env::{get_cookie_domain, get_cookie_http_only, get_cookie_secure},
-        error_printing::PrintableError,
-    },
+    util::error_printing::PrintableError,
 };
 
 use super::{Command, Opts};
@@ -79,6 +75,7 @@ async fn auth_query<I: Importer>(
     data: web::Json<Query>,
     evaluator: web::Data<Evaluator>,
     pool: web::Data<PgPool>,
+    config: web::Data<Arc<Config>>,
 ) -> impl Responder {
     enum ReturnType {
         SetToken(String),
@@ -91,74 +88,84 @@ async fn auth_query<I: Importer>(
     let data = data.into_inner();
 
     let (endpoint, payload) = (data.endpoint, data.payload);
-    let return_type: anyhow::Result<ReturnType> = async {
-        let bindings = bindings_from_json(payload)?;
-
+    let return_type: anyhow::Result<ReturnType> =
         async {
-            let mut tx = pool.begin().await?;
-            let module = evaluator.endpoint(endpoint.as_str())?;
-            let auth = module
-                .auth
-                .as_ref()
-                .ok_or_else(|| anyhow!("module at endpoint {} does not have any auth settings"))?;
-            let auth_bindings = module.verify(cookie.as_ref().map(|cookie| cookie.value()))?;
+            let bindings = bindings_from_json(payload)?;
 
-            let statements = evaluator.evaluate_endpoint(
-                endpoint.as_str(),
-                &bindings,
-                auth_bindings.as_ref(),
-            )?;
-            let queries = build_queries(&statements)?;
-            let mut query: Option<sqlx::query::Query<Postgres, PgArguments>> = None;
+            async {
+                let mut tx = pool.begin().await?;
+                let module = evaluator.endpoint(endpoint.as_str())?;
+                let auth = module.auth.as_ref().ok_or_else(|| {
+                    anyhow!("module at endpoint {} does not have any auth settings")
+                })?;
+                let auth_bindings = module.verify(
+                    config.auth.as_ref(),
+                    cookie.as_ref().map(|cookie| cookie.value()),
+                )?;
 
-            for cur in queries {
-                if let Some(cur_query) = query {
-                    cur_query.execute(&mut tx).await?;
-                }
-                query = Some(cur);
-            }
+                let statements = evaluator.evaluate_endpoint(
+                    endpoint.as_str(),
+                    &bindings,
+                    auth_bindings.as_ref(),
+                )?;
+                let queries = build_queries(&statements)?;
+                let mut query: Option<sqlx::query::Query<Postgres, PgArguments>> = None;
 
-            let query = query.ok_or_else(|| {
-                anyhow!("module at endpoint {} did not have any queries", endpoint)
-            })?;
-
-            let res: ReturnType = match auth {
-                AuthSettings::RemoveToken => {
-                    query.execute(&mut tx).await?;
-                    ReturnType::RemoveToken
+                for cur in queries {
+                    if let Some(cur_query) = query {
+                        cur_query.execute(&mut tx).await?;
+                    }
+                    query = Some(cur);
                 }
 
-                AuthSettings::VerifyToken(v) => {
-                    let res = query.fetch_one(&mut tx).await?;
-                    let data = convert_row(res)?;
-                    match v.as_ref() {
-                        None => ReturnType::DoNothing,
-                        Some(exp) => {
-                            let data = crate::server::auth::encode(&data, *exp)?;
+                let query = query.ok_or_else(|| {
+                    anyhow!("module at endpoint {} did not have any queries", endpoint)
+                })?;
+
+                let res: ReturnType =
+                    match auth {
+                        AuthSettings::RemoveToken => {
+                            query.execute(&mut tx).await?;
+                            ReturnType::RemoveToken
+                        }
+
+                        AuthSettings::VerifyToken(v) => {
+                            let res = query.fetch_one(&mut tx).await?;
+                            let data = convert_row(res)?;
+                            let secret = config.auth.as_ref().ok_or_else(|| {
+                                anyhow!("config does not have secrets configured")
+                            })?;
+                            match v.as_ref() {
+                                None => ReturnType::DoNothing,
+                                Some(exp) => {
+                                    let data = secret.encode(&data, *exp)?;
+                                    ReturnType::SetToken(data)
+                                }
+                            }
+                        }
+                        AuthSettings::SetToken(exp) => {
+                            // TODO if the user specifies more than one row
+                            // explain that exactly one row is expcted
+
+                            // TODO change errors to explain what happens
+                            // depending on whether or not the server is run
+                            // with debug mode
+                            let res = query.fetch_one(&mut tx).await?;
+                            let data = convert_row(res)?;
+                            let secret = config.auth.as_ref().ok_or_else(|| {
+                                anyhow!("config does not have secrets configured")
+                            })?;
+                            let data = secret.encode(&data, *exp)?;
                             ReturnType::SetToken(data)
                         }
-                    }
-                }
-                AuthSettings::SetToken(exp) => {
-                    // TODO if the user specifies more than one row
-                    // explain that exactly one row is expcted
+                    };
 
-                    // TODO change errors to explain what happens
-                    // depending on whether or not the server is run
-                    // with debug mode
-                    let res = query.fetch_one(&mut tx).await?;
-                    let data = convert_row(res)?;
-                    let data = crate::server::auth::encode(&data, *exp)?;
-                    ReturnType::SetToken(data)
-                }
-            };
-
-            tx.commit().await?;
-            Ok(res)
+                tx.commit().await?;
+                Ok(res)
+            }
+            .await
         }
-        .await
-    }
-    .await;
+        .await;
 
     match return_type {
         Err(err) => HttpResponse::BadRequest().json(QueryResult::<()> {
@@ -189,17 +196,7 @@ async fn auth_query<I: Importer>(
                 },
             }),
             (ReturnType::SetToken(token), _) => {
-                let mut builder = Cookie::build(COOKIE_NAME, token);
-                if let Some(domain) = get_cookie_domain().ok() {
-                    builder = builder.domain(domain)
-                }
-
-                let cookie = builder
-                    .path("/")
-                    .secure(get_cookie_secure())
-                    .http_only(get_cookie_http_only())
-                    .finish();
-
+                let cookie = config.cookie.build(COOKIE_NAME, token);
                 HttpResponse::Ok().cookie(cookie).json(json!(QueryResult {
                     endpoint,
                     data: QueryStatus::Success {
@@ -216,11 +213,13 @@ async fn run_queries<I: Importer>(
     data: web::Json<Vec<Query>>,
     evaluator: web::Data<Evaluator>,
     pool: web::Data<PgPool>,
+    config: web::Data<Arc<Config>>,
 ) -> impl Responder {
-    let cookie = req.cookie(COOKIE_NAME);
+    let cookie = &req.cookie(COOKIE_NAME);
     let evaluator = evaluator.get_ref();
     let pool = pool.get_ref();
     let data = data.into_inner();
+    let config_secret = &config.auth;
 
     let (endpoints, payloads) = data
         .into_iter()
@@ -231,14 +230,16 @@ async fn run_queries<I: Importer>(
             (v1, v2)
         });
 
-    let cookie_content = cookie.as_ref();
     let query_results =
         endpoints
             .iter()
             .zip(payloads.into_iter())
             .map(|(endpoint, payload)| async move {
                 let module = evaluator.endpoint(endpoint.as_str())?;
-                let auth_bindings = module.verify(cookie_content.map(|cookie| cookie.value()))?;
+                let auth_bindings = module.verify(
+                    config_secret.as_ref(),
+                    cookie.as_ref().map(|cookie| cookie.value()),
+                )?;
 
                 let bindings = bindings_from_json(payload)?;
 
@@ -326,10 +327,19 @@ pub async fn run_server(cmd: Server) -> anyhow::Result<()> {
     // import all files
     let evaluator = create_evaluator(cmd.directory.as_str(), cmd.extension.as_str(), cmd.watch)?;
 
-    let uri = crate::util::env::get_var("POSTGRES_URL")?;
+    let config = Config::read_config()?;
+    let config = Arc::new(config);
+
     let pool = sqlx::postgres::PgPoolOptions::new()
-        .max_connections(cmd.max_connections)
-        .connect(uri.as_str())
+        .connect(
+            config
+                .database
+                .url
+                .as_ref()
+                .and_then(|v| v.value().map(|v| v.into_owned()))
+                .ok_or_else(|| anyhow!("must have database url set in config"))?
+                .as_str(),
+        )
         .await?;
 
     for endpoint in evaluator.importer.get_all_endpoints()? {
@@ -340,6 +350,7 @@ pub async fn run_server(cmd: Server) -> anyhow::Result<()> {
         App::new()
             .wrap(middleware::Logger::default())
             .wrap(middleware::Compress::default())
+            .data(config.clone())
             .data(pool.clone())
             .data(evaluator.clone())
             .route("/", web::get().to(root))

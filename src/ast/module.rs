@@ -1,7 +1,7 @@
 use crate::{
     ast::{decorator::Decorator, parser::PResult},
     binding::Binding,
-    server::auth::decode,
+    config::Secret,
 };
 use nom::Err;
 use std::{
@@ -112,10 +112,13 @@ pub struct Module {
 impl Module {
     pub fn verify(
         &self,
+        secret: Option<&Secret>,
         cookie: Option<&str>,
     ) -> anyhow::Result<Option<BTreeMap<String, Binding>>> {
         if matches!(self.auth, Some(AuthSettings::VerifyToken(_))) {
-            return decode(cookie.ok_or_else(|| anyhow!("missing cookie"))?)
+            return secret
+                .ok_or_else(|| anyhow!("secret is needed to verify cookie auth"))?
+                .decode(cookie.ok_or_else(|| anyhow!("missing cookie"))?)
                 .map(|claim| Some(claim.claims));
         }
         Ok(None)

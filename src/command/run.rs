@@ -1,3 +1,4 @@
+use anyhow::Context;
 use clap::Clap;
 
 use crate::{
@@ -67,10 +68,15 @@ impl Command for Run {
                 .build()
                 .unwrap()
                 .block_on(async {
-                    let uri = crate::util::env::get_var("POSTGRES_URL")?;
+                    let config = crate::config::Config::read_config().context("config is needed to find postgres_url")?;
+
                     let pool = sqlx::postgres::PgPoolOptions::new()
                         .max_connections(1)
-                        .connect(uri.as_str())
+                        .connect(config.database.url.and_then(|v| Some(v.value()?.into_owned()))
+                            .ok_or_else(
+                                || anyhow!("must have database url set in config")
+                                )?.as_str()
+                            )
                         .await?;
 
                     for statement in &module.sql {

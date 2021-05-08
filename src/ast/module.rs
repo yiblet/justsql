@@ -218,6 +218,32 @@ impl Module {
         };
         Ok((input, module))
     }
+
+    pub fn evaluate<'a, A>(
+        &self,
+        bindings: &'a BTreeMap<String, A>,
+        auth_bindings: Option<&'a BTreeMap<String, A>>,
+    ) -> anyhow::Result<Vec<(String, Vec<&'a A>)>> {
+        self.sql
+            .iter()
+            .map(|stmt| -> anyhow::Result<(String, Vec<&'a A>)> {
+                let (res, mapping) = stmt.bind()?;
+                let bindings: Vec<_> = mapping
+                    .into_iter()
+                    .map(|param| match param {
+                        ParamType::Param(param) => bindings
+                            .get(param)
+                            .ok_or_else(|| anyhow!("parameter {} does not exist", param)),
+                        ParamType::Auth(param) => auth_bindings
+                            .ok_or_else(|| anyhow!("must be authorized"))?
+                            .get(param)
+                            .ok_or_else(|| anyhow!("parameter {} does not exist", param)),
+                    })
+                    .collect::<anyhow::Result<_>>()?;
+                Ok((res, bindings))
+            })
+            .collect()
+    }
 }
 
 #[cfg(test)]

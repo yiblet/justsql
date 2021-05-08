@@ -6,7 +6,6 @@ extern crate log;
 #[macro_use]
 extern crate anyhow;
 
-mod args;
 mod ast;
 mod binding;
 mod command;

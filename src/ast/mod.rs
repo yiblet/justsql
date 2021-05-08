@@ -3,4 +3,4 @@ mod module;
 mod parser;
 mod sql;
 
-pub use module::{AuthSettings, Module, ModuleError, ParamType, Statement};
+pub use module::{AuthSettings, Interp, Module, ModuleError, ParamType, Statement};

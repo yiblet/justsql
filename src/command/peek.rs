@@ -3,9 +3,9 @@ use crate::ast::Module;
 use anyhow::Context;
 use clap::Clap;
 
-/// run a query  
+/// run a query without committing the changes
 #[derive(Clap)]
-pub struct Run {
+pub struct Peek {
     /// location of the sql file
     module: String,
 
@@ -21,7 +21,7 @@ pub struct Run {
     first: bool,
 }
 
-impl Command for Run {
+impl Command for Peek {
     fn run_command(&self, _opt: &Opts) -> anyhow::Result<()> {
         let module = Module::from_path(&self.module).context("failed to find file")?;
 
@@ -53,7 +53,7 @@ impl Command for Run {
                     &pool,
                     &bindings,
                     auth_bindings.as_ref(),
-                    false,
+                    true,
                 )
                 .await?;
 

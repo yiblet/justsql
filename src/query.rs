@@ -1,6 +1,12 @@
-use sqlx::{postgres::PgArguments, Postgres};
+use std::collections::BTreeMap;
 
-use crate::binding::Binding;
+use sqlx::{postgres::PgArguments, PgPool, Postgres};
+
+use crate::{
+    ast::Module,
+    binding::Binding,
+    row_type::{convert_row, RowType},
+};
 
 pub fn build_queries<'a>(
     statements: &'a Vec<(String, Vec<&Binding>)>,
@@ -27,4 +33,42 @@ pub fn build_queries<'a>(
         .collect();
 
     Ok(queries)
+}
+
+pub async fn run_query(
+    module: &Module,
+    pool: &PgPool,
+    bindings: &BTreeMap<String, Binding>,
+    auth_bindings: Option<&BTreeMap<String, Binding>>,
+    // whether to rollback the query at the end
+    rollback: bool,
+) -> anyhow::Result<Vec<BTreeMap<String, RowType>>> {
+    async {
+        let mut tx = pool.begin().await?;
+        let statements = module.evaluate(bindings, auth_bindings)?;
+        let queries = build_queries(&statements)?;
+        let mut query: Option<sqlx::query::Query<Postgres, PgArguments>> = None;
+
+        for cur in queries {
+            if let Some(cur_query) = query {
+                cur_query.execute(&mut tx).await?;
+            }
+            query = Some(cur);
+        }
+
+        let query = query.ok_or_else(|| anyhow!("module at endpoint did not have any queries"))?;
+        let results = query
+            .fetch_all(&mut tx)
+            .await?
+            .into_iter()
+            .map(convert_row)
+            .collect::<anyhow::Result<Vec<BTreeMap<String, RowType>>>>()?;
+        if rollback {
+            tx.rollback().await?;
+        } else {
+            tx.commit().await?;
+        }
+        Ok(results)
+    }
+    .await
 }

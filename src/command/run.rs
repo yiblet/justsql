@@ -27,8 +27,7 @@ impl Command for Run {
 
         tokio::runtime::Builder::new_current_thread()
             .enable_all()
-            .build()
-            .unwrap()
+            .build()?
             .block_on(async {
                 let config = crate::config::Config::read_config()
                     .context("config is needed to find postgres_url")?;

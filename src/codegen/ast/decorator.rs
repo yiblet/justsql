@@ -1,3 +1,5 @@
+use std::path::{Path, PathBuf};
+
 use either::Either;
 use nom::{
     branch::alt,
@@ -10,21 +12,23 @@ use nom::{
     Parser,
 };
 
-use crate::{
-    ast::module::AuthSettings,
-    ast::parser::{space, PResult, ParseError},
-};
+use crate::codegen::module::AuthSettings;
 
-use super::parser::{
-    is_alpha_or_underscore, line_space0, line_space1, with_multi_line_comment,
-    with_single_line_comment,
+use super::{
+    super::result::{PResult, ParseError},
+    super::span_ref::SpanRef,
+    parser::{
+        is_alpha_or_underscore, line_space0, line_space1, space, string_literal,
+        with_multi_line_comment, with_single_line_comment,
+    },
 };
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Decorator<'a> {
+    Auth(AuthSettings),
+    Import(SpanRef<'a, &'a str>, SpanRef<'a, &'a Path>),
     Endpoint(&'a str),
     Param(&'a str),
-    Auth(AuthSettings),
 }
 
 fn get_multiplier(chr: char) -> Result<f32, &'static str> {
@@ -58,6 +62,35 @@ impl<'a> Decorator<'a> {
         decorator("param", take_while(is_alpha_or_underscore))(input)
     }
 
+    fn parse_import(input: &'a str) -> PResult<(SpanRef<'a, &'a str>, SpanRef<'a, &'a Path>)> {
+        let import = |input: &'a str| {
+            let (input, import_name) = SpanRef::parse(take_while(is_alpha_or_underscore))(input)?;
+            let (input, _) = line_space1(input)?;
+            let (input, _) = tag("from")(input)?;
+            let (input, _) = line_space1(input)?;
+            let (input, literal) = SpanRef::parse(string_literal)(input)?;
+
+            if literal.len() < 3 {
+                Err(nom::Err::Failure(ParseError::const_error(
+                    literal.start,
+                    "invalid relative path",
+                )))?
+            };
+
+            let path = literal.map(|path| Path::new(&literal.value[1..literal.value.len() - 1]));
+
+            if !path.is_relative() {
+                Err(nom::Err::Failure(ParseError::const_error(
+                    literal.start,
+                    "path is not a valid relative path",
+                )))?
+            }
+
+            Ok((input, (import_name, path)))
+        };
+        decorator("import", import)(input)
+    }
+
     fn parse_endpoint(input: &'a str) -> PResult<&'a str> {
         decorator("endpoint", take_while(is_alpha_or_underscore))(input)
     }
@@ -81,6 +114,7 @@ impl<'a> Decorator<'a> {
             Self::parse_param.map(Decorator::Param),
             Self::parse_endpoint.map(Decorator::Endpoint),
             Self::parse_auth.map(Decorator::Auth),
+            Self::parse_import.map(|(v1, v2)| Decorator::Import(v1, v2)),
         ))(input)
     }
 }
@@ -100,13 +134,15 @@ where
 }
 
 // TODO do not permit decorators with stuff after that isn't a space
-pub fn frontmatter<'a>(input: &'a str) -> PResult<Vec<Decorator<'a>>> {
+pub fn parse_decorators<'a>(input: &'a str) -> PResult<Vec<SpanRef<'a, Decorator<'a>>>> {
     let (input, decorators) = fold_many0(
         delimited(
             space,
             alt((
-                with_multi_line_comment(Decorator::parse).map(Either::Left),
-                with_single_line_comment(Decorator::parse).map(Either::Right),
+                with_multi_line_comment(SpanRef::<Decorator>::parse(Decorator::parse))
+                    .map(Either::Left),
+                with_single_line_comment(SpanRef::<Decorator>::parse(Decorator::parse))
+                    .map(Either::Right),
             )),
             space,
         ),
@@ -162,7 +198,35 @@ mod tests {
     }
 
     #[test]
-    fn frontmatter_test() {
+    fn input_decorator_test() {
+        fn unwrap_spans<A, B>((v1, v2): (SpanRef<A>, SpanRef<B>)) -> (A, B) {
+            (v1.value, v2.value)
+        }
+        let test_str = "@import friends_of from './../friends' \n\n";
+        assert_eq!(
+            unwrap_spans(Decorator::parse_import(test_str).unwrap().1),
+            ("friends_of", Path::new("./../friends"))
+        );
+
+        let test_str = "@import friends_of from 'friends' \n\n";
+        assert_eq!(
+            unwrap_spans(Decorator::parse_import(test_str).unwrap().1),
+            ("friends_of", Path::new("friends"))
+        );
+
+        let test_str = "@import friends_of from '/friends' \n\n";
+        assert!(Decorator::parse_import(test_str).is_err());
+
+        let test_str = "@import friends_@of from './friends' \n\n";
+        assert!(Decorator::parse_import(test_str).is_err());
+    }
+
+    #[test]
+    fn parse_decorators_test() {
+        fn unwrap<'a>(vec: Vec<SpanRef<'a, Decorator<'a>>>) -> Vec<Decorator<'a>> {
+            vec.into_iter().map(|span| span.value).collect()
+        }
+
         let test_str = r#"
 /* @endpoint getUser 
  * */
@@ -170,7 +234,7 @@ mod tests {
 select * from users;
 "#;
         assert_eq!(
-            frontmatter(test_str).unwrap(),
+            parse_decorators.map(unwrap).parse(test_str).unwrap(),
             (
                 "select * from users;\n",
                 vec![Decorator::Endpoint("getUser"), Decorator::Param("users")]
@@ -185,7 +249,7 @@ select * from users;
 -- @param testing testing
 select * from users;
 "#;
-        assert!(frontmatter(test_str).is_err(),);
+        assert!(parse_decorators.map(unwrap).parse(test_str).is_err(),);
 
         let test_str = r#"
 /* @endpoint getUser 
@@ -193,7 +257,7 @@ select * from users;
 select * from users;
 "#;
         assert_eq!(
-            frontmatter(test_str).unwrap(),
+            parse_decorators.map(unwrap).parse(test_str).unwrap(),
             (
                 "select * from users;\n",
                 vec![Decorator::Endpoint("getUser"), Decorator::Param("users")]
@@ -206,7 +270,7 @@ select * from users;
  * user */
 select * from users;
 "#;
-        let err = frontmatter(test_str).unwrap_err();
+        let err = parse_decorators(test_str).unwrap_err();
         assert!(match err {
             nom::Err::Failure(ParseError::NomError(v, _)) => v.starts_with("users\n"),
             _ => panic!("{}", err),

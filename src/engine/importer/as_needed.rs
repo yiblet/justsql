@@ -3,7 +3,7 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use crate::ast::Module;
+use crate::codegen::Module;
 
 use super::{importer::Importer, module_collection::ModuleCollection};
 
@@ -52,21 +52,5 @@ impl Importer for AsNeededImporter {
             .cloned()
             .collect();
         Ok(res)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use std::path::PathBuf;
-
-    use path_clean::PathClean;
-
-    use super::*;
-
-    #[test]
-    fn path_test() {
-        let path: PathBuf = ["../test/.."].iter().collect();
-        let path = path.clean();
-        assert_eq!(path.as_path(), Path::new("../"))
     }
 }

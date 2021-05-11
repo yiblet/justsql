@@ -1,6 +1,6 @@
 use std::{collections::BTreeMap, sync::Arc};
 
-use crate::ast::Module;
+use crate::codegen::Module;
 
 use super::importer::Importer;
 

@@ -6,8 +6,8 @@ extern crate log;
 #[macro_use]
 extern crate anyhow;
 
-mod ast;
 mod binding;
+mod codegen;
 mod command;
 mod config;
 mod engine;

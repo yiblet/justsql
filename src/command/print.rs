@@ -4,8 +4,8 @@ use anyhow::Context;
 use clap::Clap;
 
 use crate::{
-    ast::{Interp, Module},
     binding::Binding,
+    codegen::{Interp, Module},
 };
 
 use super::{read_json_or_json_file, Command, Opts};
@@ -44,7 +44,7 @@ impl Command for Print {
 
         for (idx, statement) in module.sql.iter().enumerate() {
             println!("PREPARE query_{} AS", idx);
-            let (stmt, _) = statement.bind()?;
+            let (stmt, _) = Module::bind(statement.iter())?;
             for lines in stmt.split('\n').filter(|line| line.trim() != "") {
                 println!("    {}", lines);
             }
@@ -53,7 +53,6 @@ impl Command for Print {
             if let Some(bindings) = payload.as_ref() {
                 print!("EXECUTE query_{}(", idx);
                 for (idx, arg) in statement
-                    .0
                     .iter()
                     .filter_map(|interp| match interp {
                         Interp::Literal(_) => None,
@@ -67,6 +66,7 @@ impl Command for Print {
                                 anyhow!("failed to find parameter {}", param.as_str())
                             }))
                         }
+                        _ => todo!(),
                     })
                     .enumerate()
                 {

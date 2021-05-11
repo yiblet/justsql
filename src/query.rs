@@ -3,8 +3,8 @@ use std::collections::BTreeMap;
 use sqlx::{postgres::PgArguments, PgPool, Postgres};
 
 use crate::{
-    ast::Module,
     binding::Binding,
+    codegen::Module,
     row_type::{convert_row, RowType},
 };
 

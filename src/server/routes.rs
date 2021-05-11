@@ -5,8 +5,8 @@ use sqlx::{postgres::PgArguments, PgPool, Postgres};
 use std::{collections::BTreeMap, sync::Arc};
 
 use crate::{
-    ast::AuthSettings,
     binding::Binding,
+    codegen::AuthSettings,
     config::Config,
     engine::Evaluator,
     query::{self, build_queries},
@@ -63,7 +63,8 @@ pub async fn auth_query(
         let mut tx = pool.begin().await?;
         let module = evaluator.endpoint(endpoint.as_str())?;
         let auth = module
-            .auth
+            .front_matter
+            .auth_settings
             .as_ref()
             .ok_or_else(|| anyhow!("module at endpoint {} does not have any auth settings"))?;
         let auth_bindings = module.verify(

@@ -1,5 +1,5 @@
 use super::{Command, Opts};
-use crate::ast::Module;
+use crate::codegen::Module;
 use anyhow::Context;
 use clap::Clap;
 

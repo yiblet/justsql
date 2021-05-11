@@ -3,9 +3,9 @@ use clap::Clap;
 use serde::de::DeserializeOwned;
 
 mod peek;
+mod print;
 mod run;
 mod server;
-mod print;
 
 pub fn read_input<A: DeserializeOwned, B: DeserializeOwned>(
     input: &str,

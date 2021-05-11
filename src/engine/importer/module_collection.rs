@@ -1,5 +1,5 @@
 use crate::{
-    ast::{Module, ModuleError},
+    codegen::{Module, ModuleError},
     util::{
         error_printing::{print_error, print_unpositioned_error, PrintableError},
         path::path_relative_to_current_dir,
@@ -49,6 +49,12 @@ impl PrintableError for ModuleCollectionError {
                 ModuleError::IOError(_) | ModuleError::Incomplete => {
                     print_unpositioned_error(writer, err.to_string().as_ref(), file_name)?
                 }
+                ModuleError::MultipleParseError { file, errors } => {
+                    for (pos, err) in errors.iter() {
+                        print_error(writer, file.as_str(), *pos, err.as_str(), file_name)?
+                    }
+                }
+
                 ModuleError::ParseError { file, pos, .. }
                 | ModuleError::NomParseError { file, pos } => print_error(
                     writer,
@@ -122,7 +128,7 @@ impl ModuleCollection {
             let module = Arc::new(Module::from_path(&location)?);
 
             // insert module endpoint
-            if let Some(endpoint) = module.endpoint.as_ref() {
+            if let Some(endpoint) = module.front_matter.endpoint.as_ref() {
                 if collection.endpoints.contains_key(endpoint) {
                     Err(ModuleCollectionError::AlreadyUsedEndpointError(
                         endpoint.to_owned(),
@@ -157,7 +163,10 @@ impl ModuleCollection {
         }
         // no need for transactions since this cannot fail
         let removed_arc = self.locations.remove(new_loc);
-        match removed_arc.as_ref().and_then(|arc| arc.endpoint.as_ref()) {
+        match removed_arc
+            .as_ref()
+            .and_then(|arc| arc.front_matter.endpoint.as_ref())
+        {
             Some(endpoint) => {
                 self.endpoints.remove(endpoint);
                 Ok(true)

@@ -9,7 +9,7 @@ use notify::{watcher, DebouncedEvent, INotifyWatcher, RecursiveMode, Watcher};
 use thiserror::Error;
 
 use crate::{
-    ast::Module,
+    codegen::Module,
     util::{error_printing::PrintableError, path::path_relative_to_current_dir},
 };
 

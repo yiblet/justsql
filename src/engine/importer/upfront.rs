@@ -1,6 +1,6 @@
 use std::{io, path::Path, sync::Arc};
 
-use crate::ast::Module;
+use crate::codegen::Module;
 
 use super::{
     importer::Importer,

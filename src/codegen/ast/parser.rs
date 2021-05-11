@@ -1,49 +1,14 @@
 use nom::{
-    bytes::complete::{tag, take_till, take_while},
+    branch::alt,
+    bytes::complete::{is_not, tag, take, take_till, take_while},
     character::complete::satisfy,
     combinator::{cut, eof, opt, peek},
-    multi::separated_list0,
-    Err, IResult, Parser,
+    multi::{fold_many0, separated_list0},
+    sequence::delimited,
+    Err, Parser,
 };
 
-use thiserror::Error;
-
-#[derive(Error, Debug, Clone)]
-pub enum ParseError<'a> {
-    #[error("Parser failed at {0}")]
-    NomError(&'a str, nom::error::ErrorKind),
-    #[error("Parser failed at {0} due to {1}")]
-    ErrorKind(&'a str, ErrorKind<'a>),
-}
-
-#[derive(Error, Debug, Clone)]
-pub enum ErrorKind<'a> {
-    #[error("{0}")]
-    ConstError(&'static str),
-    #[error("undefined parameter {0}")]
-    UndefinedParameterError(&'a str),
-}
-
-impl<'a> ParseError<'a> {
-    pub fn const_error(input: &'a str, reason: &'static str) -> ParseError<'a> {
-        ParseError::ErrorKind(input, ErrorKind::ConstError(reason))
-    }
-    pub fn error_kind(input: &'a str, kind: ErrorKind<'a>) -> ParseError<'a> {
-        ParseError::ErrorKind(input, kind)
-    }
-}
-
-impl<'a> nom::error::ParseError<&'a str> for ParseError<'a> {
-    fn from_error_kind(input: &'a str, kind: nom::error::ErrorKind) -> Self {
-        ParseError::NomError(input, kind)
-    }
-
-    fn append(_input: &'a str, _kind: nom::error::ErrorKind, other: Self) -> Self {
-        other
-    }
-}
-
-pub type PResult<'a, O> = IResult<&'a str, O, ParseError<'a>>;
+use crate::codegen::result::{PResult, ParseError};
 
 // all space character except for new lines
 pub fn line_space0(input: &str) -> PResult<&str> {
@@ -64,6 +29,29 @@ pub fn line_space1(input: &str) -> PResult<&str> {
 
 pub fn space(input: &str) -> PResult<&str> {
     take_while(|chr: char| chr.is_whitespace())(input)
+}
+
+pub fn string_literal<'a>(input: &'a str) -> PResult<&'a str> {
+    let double_quote_literal = delimited(
+        tag("\""),
+        fold_many0(
+            (tag("\\").and(take(1usize)).map(|_| ())).or(is_not("\\\"").map(|_| ())),
+            (),
+            |_, _| (),
+        ),
+        tag("\""),
+    );
+    let single_quote_literal = delimited(
+        tag("'"),
+        fold_many0(
+            (tag("\\").and(take(1usize)).map(|_| ())).or(is_not("\\'").map(|_| ())),
+            (),
+            |_, _| (),
+        ),
+        tag("'"),
+    );
+    let (output, _) = alt((single_quote_literal, double_quote_literal))(input)?;
+    Ok((output, &input[..input.len() - output.len()]))
 }
 
 ///  parses decorator inside single line comment

@@ -329,19 +329,16 @@ mod secret_kind_serde {
         }
 
         let secret_kind = match (secret, decoding, encoding) {
-        (Some(secret), None, None) => SecretKind::Symmetric { secret },
-        (None, Some(decoding), encoding) => SecretKind::Assymmetric {
-            decoding,
-            encoding,
-        },
-        _ => 
-            Err(de::Error::custom(
-            "for the HS algorithms (HS256, HS384, HS512) the field secret_key_base64, or secret_key_from_file is expected; for the other algorithms field decoding_key_base64 or decoding_key_from_file, and the field field encoding_key_base64 or encoding_key_from_file is expected. 
-            ",
-        ))?
-            ,
-    };
-
+            (Some(secret), None, None) => SecretKind::Symmetric { secret },
+            (None, Some(decoding), encoding) => SecretKind::Assymmetric {
+                decoding,
+                encoding,
+            },
+            _ => Err(de::Error::custom(
+                "for the HS algorithms (HS256, HS384, HS512) the field secret_key_base64, or secret_key_from_file is expected; for the other algorithms field decoding_key_base64 or decoding_key_from_file, and the field field encoding_key_base64 or encoding_key_from_file is expected.
+                "
+            ))? ,
+        };
         Ok(secret_kind)
     }
 } /* secret_kind_serde */

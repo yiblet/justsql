@@ -1,6 +1,6 @@
 use std::{fmt, path::Path, sync::Arc};
 
-use crate::ast::Module;
+use crate::codegen::Module;
 
 pub trait Importer: Send + Sync + 'static + fmt::Debug {
     fn get_module_from_endpoint(&self, endpoint: &str) -> anyhow::Result<Arc<Module>>;

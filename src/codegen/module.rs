@@ -266,7 +266,7 @@ where id = @id
 AND @email = 'testing 123 @haha' 
 OR 0 = @id"#;
         let module = Module::from_str(path.clone(), test_str).unwrap();
-        assert_eq!(format!("{:?}", &module), "Module { front_matter: FrontMatter { endpoint: None, params: [\"email\", \"id\"], imports: {}, auth_settings: None }, sql: [[Literal(\"select * from users \\nwhere id = \"), Param(\"id\"), Literal(\" \\nAND \"), Param(\"email\"), Literal(\" = \\\'testing 123 @haha\\\' \\nOR 0 = \"), Param(\"id\")]] }");
+        assert_eq!(format!("{:?}", &module), "Module { front_matter: FrontMatter { location: \"\", endpoint: None, params: [\"email\", \"id\"], imports: {}, auth_settings: None }, sql: [[Literal(\"select * from users \\nwhere id = \"), Param(\"id\"), Literal(\" \\nAND \"), Param(\"email\"), Literal(\" = \\\'testing 123 @haha\\\' \\nOR 0 = \"), Param(\"id\")]] }");
 
         let test_str = r#"
 /* @param email 
@@ -280,7 +280,7 @@ OR 0 = @id"#;
         assert_eq!(
             format!("{:?}", &err)
             ,
-            "Failure(ErrorKind(\"@id \\nAND @email = \\\'testing 123 @haha\\\' \\nOR 0 = @id\", UndefinedParameterError(\"id\")))"
+            "Failure(Multiple([ErrorKind(\"@id \\nAND @email = \\\'testing 123 @haha\\\' \\nOR 0 = @id\", UndefinedParameterError(\"id\")), ErrorKind(\"@id\", UndefinedParameterError(\"id\"))]))"
         );
 
         let test_str = r#"

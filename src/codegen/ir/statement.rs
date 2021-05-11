@@ -115,11 +115,15 @@ impl Statements {
             .flat_map(|stmt| stmt.0.iter())
             .find(|interp| matches!(interp.value, InterpSpan::AuthParam(_)));
 
-        if has_auth.is_some() && front_matter.auth_settings.is_none() {
-            errors.push(ParseError::const_error(
-                has_auth.unwrap().start,
+        if let Some(auth) = has_auth {
+            if front_matter.auth_settings.is_none() {
+                errors.push(ParseError::const_error(
+                    // this doesn't panic because we have ensured has_auth.is_some() in the line
+                    // before
+                auth.start,
                 "used auth variable without declaring that the module requires auth. add @auth decorator at the start of the file."
             ))
+            }
         }
 
         errors.extend(Self::check_reserved_words(sql));
@@ -134,6 +138,7 @@ impl Statements {
         let mut errors = Self::check_for_errors(front_matter, &sql);
 
         if errors.len() == 1 {
+            // errors has at least one item
             Err(errors.pop().unwrap())?
         } else if errors.len() > 1 {
             Err(ParseError::Multiple(errors))?

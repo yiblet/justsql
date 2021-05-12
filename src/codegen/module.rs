@@ -3,7 +3,17 @@ use super::{
     ir::{FrontMatter, Interp, Statements},
     result::{CResult, ParseError},
 };
-use crate::{binding::Binding, config::Secret};
+use crate::{
+    binding::Binding,
+    codegen::toposort::topological_sort,
+    config::Secret,
+    engine::ModuleCollectionError,
+    util::{
+        error_printing::{print_error, print_unpositioned_error, PrintableError},
+        path::path_relative_to_current_dir,
+    },
+};
+use futures::future::err;
 use std::{
     borrow::{Borrow, Cow},
     collections::BTreeMap,
@@ -43,6 +53,10 @@ pub enum ModuleError {
     },
     #[error("file is incomplete")]
     Incomplete,
+    #[error("there is a cyclic dependency")]
+    CyclicDependency(Vec<PathBuf>),
+    #[error("multiple errors")]
+    Multiple(Vec<ModuleError>),
 }
 
 impl ModuleError {
@@ -120,6 +134,46 @@ impl ModuleError {
     }
 }
 
+impl PrintableError for ModuleError {
+    fn print_error<W: std::fmt::Write>(
+        &self,
+        writer: &mut W,
+        file_name: &str,
+    ) -> Result<(), crate::util::error_printing::PrintError> {
+        // FIXME change relative pathing to current dir
+        let path = path_relative_to_current_dir(Path::new(file_name).to_path_buf());
+        let lossy = path.to_string_lossy();
+        let file_name = lossy.as_ref(); // FIXME module errors must now contain the module they pointed to
+
+        match self {
+            ModuleError::Multiple(errors) => {
+                for error in errors.iter() {
+                    error.print_error(writer, file_name)?;
+                }
+            }
+            ModuleError::CyclicDependency(paths) => {
+                eprintln!("cyclic dependency in at least one of the following files:");
+                for path in paths.iter().cloned().map(path_relative_to_current_dir) {
+                    eprintln!("\t {}", path.to_string_lossy());
+                }
+            }
+            ModuleError::IOError(_) | ModuleError::Incomplete => {
+                print_unpositioned_error(writer, self.to_string().as_ref(), file_name)?
+            }
+            ModuleError::MultipleParseError { file, errors } => {
+                for (pos, err) in errors.iter() {
+                    print_error(writer, file.as_str(), *pos, err.as_str(), file_name)?
+                }
+            }
+            ModuleError::ParseError { file, pos, error } => {
+                print_error(writer, file.as_str(), *pos, error.as_str(), file_name)?
+            }
+        };
+
+        Ok(())
+    }
+}
+
 // TODO set up "pre-interpolated" sql type
 #[derive(Debug, Clone)]
 pub struct Module {
@@ -151,7 +205,10 @@ impl Module {
         self.sql.len() == 1
     }
 
-    pub fn new<'a>(ast: Ast<'a>, modules: &BTreeMap<&Path, &Module>) -> CResult<'a, Self> {
+    pub fn new<'a, P: Borrow<Path> + Ord>(
+        ast: Ast<'a>,
+        modules: &BTreeMap<P, Module>,
+    ) -> CResult<'a, Self> {
         let Ast {
             file_loc,
             decorators,
@@ -168,13 +225,12 @@ impl Module {
 
     pub fn from_str(file_loc: PathBuf, input: &str) -> Result<Module, nom::Err<ParseError>> {
         let (_, ast) = Ast::parse(file_loc, input)?;
-        Self::new(ast, &BTreeMap::new()).map_err(nom::Err::Failure)
+        Self::new(ast, &BTreeMap::<&Path, _>::new()).map_err(nom::Err::Failure)
     }
 
-    /// NOTE this only works
-    pub fn from_path<A: AsRef<Path>>(input: A) -> Result<Module, ModuleError> {
+    /// FIXME this only works for single modules with no import statements
+    pub fn from_path<'a>(path: &'a Path) -> Result<Module, ModuleError> {
         use std::io::prelude::*;
-        let path = input.as_ref();
         let mut file = std::fs::File::open(path)?;
         let mut file_content = String::with_capacity(file.metadata()?.len() as usize);
         file.read_to_string(&mut file_content)?;
@@ -182,6 +238,103 @@ impl Module {
         // figure out a way to handle this without a copy.
         Self::from_str(path.to_path_buf(), file_content.as_str())
             .map_err(|err| ModuleError::with_nom_error(file_content.as_str().into(), err))
+    }
+
+    // paths should all be canonical paths
+    // TODO make existing modules work for watching importer
+    pub fn from_paths<'a>(paths: &[&'a Path]) -> Result<BTreeMap<&'a Path, Module>, ModuleError> {
+        use std::io::prelude::*;
+        let mut file_contents = vec![];
+
+        // first parse paths into path contents
+        let mut path_mapping: BTreeMap<&Path, usize> = BTreeMap::new();
+        let paths_iter = paths.iter().cloned();
+
+        for (idx, path) in paths_iter.clone().enumerate() {
+            path_mapping.insert(path, idx);
+            let mut file = std::fs::File::open(path)?;
+            let mut file_content = String::new();
+            file.read_to_string(&mut file_content)?;
+            file_contents.push(file_content);
+        }
+
+        let contents = file_contents.as_slice();
+
+        // parse asts
+        let asts: Vec<Result<Ast, ModuleError>> = paths_iter
+            .enumerate()
+            .map(|(idx, path)| {
+                Ast::parse(path.to_path_buf(), contents[idx].as_str())
+                    .map(|v| v.1)
+                    .map_err(|err| {
+                        ModuleError::with_nom_error(Cow::Borrowed(contents[idx].as_str()), err)
+                    })
+            })
+            .collect();
+
+        if asts.iter().any(Result::is_err) {
+            Err(ModuleError::Multiple(
+                asts.into_iter()
+                    .filter(Result::is_err)
+                    .map(Result::unwrap_err)
+                    .collect(),
+            ))?
+        } else {
+            // finally topologically sort by ast and complete the rest in topological order
+
+            // all asts are guarenteed to have no errors because
+            // this line cannot be evaluated if an ast has an error
+            let mut asts: Vec<Option<Ast>> = asts.into_iter().map(Result::ok).collect();
+            // currently asts maintain the order that paths came in from the argument
+            let edges: Vec<(usize, usize)> = asts
+                .iter()
+                .enumerate()
+                .flat_map(|(idx, ast)| {
+                    let path_mapping_ref = &path_mapping;
+                    ast.iter().flat_map(move |ast| {
+                        ast.canonicalized_dependencies()
+                            .filter_map(move |path_buf| {
+                                let dep_idx = path_mapping_ref.get(path_buf.value.as_path())?;
+                                Some((idx, *dep_idx))
+                            })
+                    })
+                })
+                .collect();
+
+            let sorted = topological_sort(edges.iter()).map_err(|set| {
+                ModuleError::CyclicDependency(
+                    set.into_iter()
+                        .filter_map(|v| paths.get(*v).cloned().map(Path::to_path_buf))
+                        .collect(),
+                )
+            })?;
+            assert_eq!(sorted.len(), asts.len());
+
+            let mut modules = BTreeMap::new();
+            let mut errors: Vec<ModuleError> = vec![];
+
+            for (idx, ast) in sorted
+                .into_iter()
+                .filter_map(|idx| Some((*idx, asts.get_mut(*idx)?.take()?)))
+            {
+                match Module::new(ast, &modules).map_err(|err| {
+                    ModuleError::with_parse_error(Cow::Borrowed(&file_contents[idx]), err)
+                }) {
+                    Ok(res) => {
+                        modules.insert(paths[idx], res);
+                    }
+                    Err(err) => errors.push(err),
+                }
+            }
+
+            if errors.len() == 1 {
+                Err(errors.pop().unwrap())
+            } else if errors.len() > 1 {
+                Err(ModuleError::Multiple(errors))
+            } else {
+                Ok(modules)
+            }
+        }
     }
 
     pub fn evaluate<'a, A>(

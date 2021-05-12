@@ -77,7 +77,7 @@ impl<'a> Decorator<'a> {
                 )))?
             };
 
-            let path = literal.map(|path| Path::new(&literal.value[1..literal.value.len() - 1]));
+            let path = literal.map(|path| Path::new(&path[1..path.len() - 1]));
 
             if !path.is_relative() {
                 Err(nom::Err::Failure(ParseError::const_error(

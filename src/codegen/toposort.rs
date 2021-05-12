@@ -4,7 +4,7 @@ use std::collections::BTreeSet;
 /// returns None if the graph contains a cycle
 pub fn topological_sort<'a, T: Ord + 'a, I: Iterator<Item = &'a (T, T)>>(
     iter: I,
-) -> Option<Vec<&'a T>> {
+) -> Result<Vec<&'a T>, BTreeSet<&'a T>> {
     let mut parent_of_relations = BTreeSet::new();
     let mut child_of_relations = BTreeSet::new();
     let mut all_nodes = BTreeSet::new();
@@ -33,11 +33,11 @@ pub fn topological_sort<'a, T: Ord + 'a, I: Iterator<Item = &'a (T, T)>>(
     if min.is_none() {
         // the degenerate case
         // only happens if the input iter is empty
-        return Some(vec![]);
+        return Ok(vec![]);
     }
 
-    let min = min?; // we can ensure min is Some
-    let max = max?; // same for max
+    let min = min.unwrap(); // we can ensure min is Some
+    let max = max.unwrap(); // same for max
 
     // generate the first set of nodes that have adjacencies:
     let mut leaves: Vec<_> = parent_of_relations
@@ -77,11 +77,22 @@ pub fn topological_sort<'a, T: Ord + 'a, I: Iterator<Item = &'a (T, T)>>(
     }
 
     if parent_of_relations.len() != 0 {
-        None // some edges where not traversed despite all nodes with no
-             // outbound edges having been removed. This means there must exist
-             // at least one cycle in the remaining subgraph.
+        // some edges where not traversed despite all nodes with no
+        // outbound edges having been removed. This means there must exist
+        // at least one cycle in the remaining subgraph.
+
+        let cycle = parent_of_relations
+            .into_iter()
+            .flat_map(|(v1, v2)| vec![v1, v2].into_iter())
+            .chain(
+                child_of_relations
+                    .into_iter()
+                    .flat_map(|(v1, v2)| vec![v1, v2].into_iter()),
+            )
+            .collect();
+        Err(cycle)
     } else {
-        Some(res) // the topological ordering.
+        Ok(res) // the topological ordering.
     }
 }
 
@@ -90,22 +101,41 @@ mod tests {
     use super::*;
 
     #[test]
-    fn topological_sort_test() {
+    fn topological_sort_no_cycle_test() {
         let val = [(1, 2), (2, 3)].iter();
         let res = topological_sort(val);
-        assert_eq!(res, Some(vec![&3, &2, &1]));
+        assert_eq!(res, Ok(vec![&3, &2, &1]));
 
         let val = [(1, 2), (2, 3)].iter();
         let res = topological_sort(val);
-        assert_eq!(res, Some(vec![&3, &2, &1]));
+        assert_eq!(res, Ok(vec![&3, &2, &1]));
 
         let val = [(1, 2), (4, 3), (2, 3)].iter();
         let res = topological_sort(val);
-        assert_eq!(res, Some(vec![&3, &4, &2, &1]));
+        assert_eq!(res, Ok(vec![&3, &4, &2, &1]));
 
         // directed diamond
         let val = [(1, 2), (5, 1), (5, 4), (4, 3), (2, 3)].iter();
         let res = topological_sort(val);
-        assert_eq!(res, Some(vec![&3, &4, &2, &1, &5]));
+        assert_eq!(res, Ok(vec![&3, &4, &2, &1, &5]));
+
+        let val = [(1, 2), (5, 1), (5, 4), (4, 3), (2, 3)].iter();
+        let res = topological_sort(val);
+        assert_eq!(res, Ok(vec![&3, &4, &2, &1, &5]));
+    }
+
+    #[test]
+    fn topological_sort_cycle_test() {
+        let val = [(1, 2), (2, 1)].iter();
+        let res = topological_sort(val);
+        assert_eq!(res, Err([1, 2].iter().collect()));
+
+        let val = [(1, 2), (2, 1), (2, 3)].iter();
+        let res = topological_sort(val);
+        assert_eq!(res, Err([1, 2].iter().collect()));
+
+        let val = [(1, 2), (2, 3), (3, 1), (3, 4)].iter();
+        let res = topological_sort(val);
+        assert_eq!(res, Err([1, 2, 3].iter().collect()));
     }
 }

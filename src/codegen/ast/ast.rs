@@ -21,7 +21,7 @@ impl<'a> Ast<'a> {
     pub fn parse(file_loc: PathBuf, input: &'a str) -> PResult<'a, Self> {
         let (input, decorators) = parse_decorators(input)?;
         let (input, statements) = parse_statements(input)?;
-        let (input, _) = eof(input).map_err(|err: nom::Err<ParseError>| {
+        let (input, _) = eof(input).map_err(|_: nom::Err<ParseError>| {
             nom::Err::Failure(ParseError::error_kind(
                 input,
                 ErrorKind::ConstError("expected end of file"),
@@ -47,7 +47,7 @@ impl<'a> Ast<'a> {
         self.decorators
             .iter()
             .filter_map(move |decorator| match &decorator.value {
-                Decorator::Import(name, path) => path
+                Decorator::Import(_, path) => path
                     .map(|path| {
                         let mut cur_loc = file_loc.to_path_buf();
                         cur_loc.push(path);

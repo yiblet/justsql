@@ -27,7 +27,7 @@ pub struct Print {
 impl Command for Print {
     // TODO split up this function
     fn run_command(&self, _opt: &Opts) -> anyhow::Result<()> {
-        let module = Module::from_path(&self.module).context("failed to find file")?;
+        let module = Module::from_path(self.module.as_ref()).context("failed to find file")?;
 
         let payload = self
             .json

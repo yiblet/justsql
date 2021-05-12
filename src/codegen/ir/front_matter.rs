@@ -6,6 +6,7 @@ use crate::codegen::{
     AuthSettings, Module,
 };
 use std::{
+    borrow::Borrow,
     collections::{BTreeMap, BTreeSet},
     ops::Deref,
     path::{Path, PathBuf},
@@ -34,7 +35,7 @@ impl FrontMatter {
             .filter_map(|decorator| match decorator.deref() {
                 Decorator::Import(input, _path) => Some(*input),
                 Decorator::Endpoint(keyword) | Decorator::Param(keyword) => {
-                    Some(decorator.as_ref().map(|v| *keyword))
+                    Some(decorator.with(keyword))
                 }
                 Decorator::Auth(_) => None,
             });
@@ -42,10 +43,10 @@ impl FrontMatter {
         check_reserved_words(iter)
     }
 
-    pub fn new<'a>(
+    pub fn new<'a, P: Borrow<Path> + Ord>(
         location: PathBuf,
         mut decorators: Vec<SpanRef<'a, Decorator<'a>>>,
-        modules: &BTreeMap<&Path, &Module>,
+        modules: &BTreeMap<P, Module>,
     ) -> CResult<'a, Self> {
         // checking logic:
         //     1. all imports must not have conflicting names

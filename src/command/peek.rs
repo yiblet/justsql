@@ -23,7 +23,7 @@ pub struct Peek {
 
 impl Command for Peek {
     fn run_command(&self, _opt: &Opts) -> anyhow::Result<()> {
-        let module = Module::from_path(&self.module).context("failed to find file")?;
+        let module = Module::from_path(self.module.as_ref()).context("failed to find file")?;
 
         tokio::runtime::Builder::new_current_thread()
             .enable_all()

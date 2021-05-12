@@ -36,28 +36,17 @@ impl PrintableError for ModuleCollectionError {
         writer: &mut W,
         file_name: &str,
     ) -> Result<(), crate::util::error_printing::PrintError> {
+        // FIXME change relative pathing to current dir
         let path = path_relative_to_current_dir(Path::new(file_name).to_path_buf());
         let lossy = path.to_string_lossy();
-        let file_name = lossy.as_ref();
+        let file_name = lossy.as_ref(); // FIXME module errors must now contain the module they pointed to
 
         match self {
             ModuleCollectionError::AlreadyUsedEndpointError(_)
             | ModuleCollectionError::ModuleNotFound => {
                 print_unpositioned_error(writer, self.to_string().as_ref(), file_name)?
             }
-            ModuleCollectionError::ModuleError(err) => match err {
-                ModuleError::IOError(_) | ModuleError::Incomplete => {
-                    print_unpositioned_error(writer, err.to_string().as_ref(), file_name)?
-                }
-                ModuleError::MultipleParseError { file, errors } => {
-                    for (pos, err) in errors.iter() {
-                        print_error(writer, file.as_str(), *pos, err.as_str(), file_name)?
-                    }
-                }
-                ModuleError::ParseError { file, pos, error } => {
-                    print_error(writer, file.as_str(), *pos, error.as_str(), file_name)?
-                }
-            },
+            ModuleCollectionError::ModuleError(err) => err.print_error(writer, file_name)?,
         };
 
         Ok(())

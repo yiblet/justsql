@@ -5,7 +5,7 @@ use std::{
     time::Duration,
 };
 
-use notify::{watcher, DebouncedEvent, INotifyWatcher, RecursiveMode, Watcher};
+use notify::{watcher, DebouncedEvent, RecommendedWatcher, RecursiveMode, Watcher};
 use thiserror::Error;
 
 use crate::{
@@ -163,7 +163,7 @@ impl WatchingInternals {
 
 fn listen_event(
     collection: &Mutex<ModuleCollection>,
-    watcher: &mut INotifyWatcher,
+    watcher: &mut RecommendedWatcher,
     evt: DebouncedEvent,
     ext: &str,
 ) -> Result<(), EventError> {

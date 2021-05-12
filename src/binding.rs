@@ -14,6 +14,7 @@ impl Binding {
     pub fn to_sql_string(&self) -> anyhow::Result<String> {
         use std::io::Write;
         let mut buf = Vec::new();
+
         match self {
             Binding::Int(i) => write!(&mut buf, "{}", i)?,
             Binding::Float(float) => write!(&mut buf, "{}", float)?,

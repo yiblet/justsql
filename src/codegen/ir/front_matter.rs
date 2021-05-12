@@ -19,6 +19,8 @@ pub struct FrontMatter {
     pub endpoint: Option<String>,
     pub params: Vec<String>,
     /// maps import name to canonicalized location and names of that module's parameters
+    /// FIXME remove module parameter names this part would break if the importing module's
+    /// changes it's parameter names during watch mode.
     pub imports: BTreeMap<String, (PathBuf, Vec<String>)>,
     pub auth_settings: Option<AuthSettings>,
 }

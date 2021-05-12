@@ -41,8 +41,6 @@ pub enum ModuleError {
         pos: usize,
         error: String,
     },
-    #[error("unexpected token")]
-    NomParseError { file: String, pos: usize },
     #[error("file is incomplete")]
     Incomplete,
 }

@@ -2,6 +2,7 @@ use anyhow::Context;
 use clap::Clap;
 use serde::de::DeserializeOwned;
 
+mod init;
 mod peek;
 mod print;
 mod run;
@@ -50,6 +51,7 @@ impl Opts {
 
 #[derive(Clap)]
 pub enum SubCommand {
+    Init(init::Init),
     Peek(peek::Peek),
     Print(print::Print),
     Run(run::Run),
@@ -63,6 +65,7 @@ pub trait Command {
 impl Command for SubCommand {
     fn run_command(&self, opt: &Opts) -> anyhow::Result<()> {
         match self {
+            SubCommand::Init(init) => init.run_command(opt),
             SubCommand::Peek(peek) => peek.run_command(opt),
             SubCommand::Print(print) => print.run_command(opt),
             SubCommand::Run(run) => run.run_command(opt),

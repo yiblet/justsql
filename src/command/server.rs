@@ -24,6 +24,7 @@ pub struct Server {
     #[clap(short, long, default_value = "10")]
     max_connections: u32,
 
+    /// File extensions to watch - defaults to 'sql' file types
     #[clap(short, long, default_value = "sql")]
     extension: String,
 

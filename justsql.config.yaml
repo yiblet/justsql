@@ -1,3 +1,4 @@
+
 # sets the database url
 database:
   url:
@@ -5,14 +6,14 @@ database:
     # from an environment variable that's either in a .env or passed in
     from_env: $DATABASE_URL
     # (optional) defualt value if the environment variable is not set
-    default: "postgres://postgres:postgres@localhost:5432/postgres"
+    default: postgres://postgres:postgres@localhost:5432/postgres 
 
 auth:
   # auth algorithm
   algorithm: HS256
   # randomly generated key for secret_key_base64
   # created from running "head -c 32 < /dev/random | base64"
-  # for production we reccomend using a secure random number generator
+  # for production we recommend using a secure random number generator
   # to generate the key
   secret_key_base64: 7phkIkcWtlxOovDKbCxj9aFriq6KLyN/8wrnDMzJ3WE=
 

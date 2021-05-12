@@ -54,15 +54,9 @@ impl PrintableError for ModuleCollectionError {
                         print_error(writer, file.as_str(), *pos, err.as_str(), file_name)?
                     }
                 }
-
-                ModuleError::ParseError { file, pos, .. }
-                | ModuleError::NomParseError { file, pos } => print_error(
-                    writer,
-                    file.as_str(),
-                    *pos,
-                    err.to_string().as_str(),
-                    file_name,
-                )?,
+                ModuleError::ParseError { file, pos, error } => {
+                    print_error(writer, file.as_str(), *pos, error.as_str(), file_name)?
+                }
             },
         };
 

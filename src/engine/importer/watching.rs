@@ -9,7 +9,7 @@ use notify::{watcher, DebouncedEvent, INotifyWatcher, RecursiveMode, Watcher};
 use thiserror::Error;
 
 use crate::{
-    codegen::Module,
+    codegen::{Module, ModuleError},
     util::{error_printing::PrintableError, path::path_relative_to_current_dir},
 };
 
@@ -73,7 +73,9 @@ pub enum EventError {
     #[error("Abort due to {0}")]
     AbortError(&'static str),
     #[error("{0}")]
-    ModuleCollectionError(String, ModuleCollectionError),
+    ModuleCollectionError(#[from] ModuleCollectionError),
+    #[error("multiple module collection errors")]
+    PartialImportError(Vec<ModuleError>),
     #[error("{0}")]
     NotifyError(#[from] notify::Error),
 }
@@ -86,25 +88,13 @@ struct WatchingInternals {
 
 impl WatchingInternals {
     pub fn new(directory: &str, extension: &str) -> anyhow::Result<Self> {
-        let (collection, errors) = ModuleCollection::from_directory(directory, extension, false)?;
-
-        let mut buf = String::new();
-
+        let (collection, errors) = ModuleCollection::from_directory(directory, extension, false);
         if errors.len() != 0 {
-            let plural = if errors.len() > 1 { "s" } else { "" };
-            eprintln!("detected errors in the following file{}:\n", plural);
-            for (path, err) in errors {
-                match err.print_error(&mut buf, path.as_str()) {
-                    Ok(_) => {
-                        eprintln!("{}", buf);
-                        buf.clear();
-                    }
-                    Err(err) => {
-                        Err(err)?;
-                    }
-                }
+            let mut buf = String::new();
+            for err in errors {
+                err.print_error(&mut buf)?;
             }
-        }
+        };
 
         let collection = Arc::new(Mutex::new(collection));
         let handle = Self::create_watcher(collection.clone(), directory, extension)?;
@@ -137,19 +127,13 @@ impl WatchingInternals {
 
             if let Err(err) = listen_event(collection.as_ref(), &mut watcher, event, ext.as_str()) {
                 match err {
-                    EventError::ModuleCollectionError(path, err) => {
-                        match err.print_error(&mut buf, path.as_str()) {
-                            Ok(_) => {
-                                error!("could not apply change due to error:\n\n{}", buf);
-                                buf.clear();
-                            }
-                            Err(err) => warn!(
-                                "could not display error when reporting issues in {}: {}",
-                                path.as_str(),
-                                err
-                            ),
+                    EventError::ModuleCollectionError(err) => match err.print_error(&mut buf) {
+                        Ok(_) => {
+                            error!("could not apply change due to error:\n\n{}", buf);
+                            buf.clear();
                         }
-                    }
+                        Err(err) => warn!("display error when reporting issues: {}", err),
+                    },
                     _ => warn!("failure while watching files {}", err),
                 }
             }
@@ -182,7 +166,7 @@ fn listen_event(
                     .lock()
                     .map_err(|_| EventError::AbortError(mutex_lock_error))?;
                 if guard.remove(path.as_ref()).ok() == Some(true) {
-                    let path = path_relative_to_current_dir(path);
+                    let path = path_relative_to_current_dir(path.as_ref());
                     info!("noticed deletion of {}", path.to_string_lossy())
                 }
             }
@@ -192,29 +176,13 @@ fn listen_event(
         // Rename
         DebouncedEvent::Rename(old, new) => match FileType::from(new.as_ref(), ext) {
             FileType::RightExtFile => {
-                let mut guard = collection
-                    .lock()
-                    .map_err(|_| EventError::AbortError(mutex_lock_error))?;
-
-                guard.transaction::<(), EventError, _>(|collection| {
-                    let file_name = new.to_string_lossy().to_string();
-
-                    if let Err(err) = collection.remove(old.as_ref()) {
-                        return Err(EventError::ModuleCollectionError(file_name, err));
-                    }
-                    if let Err(err) = collection.upsert(new.clone()) {
-                        Err(EventError::ModuleCollectionError(file_name, err))?
-                    } else {
-                        let new = path_relative_to_current_dir(new);
-                        let old = path_relative_to_current_dir(old);
-                        info!(
-                            "noticed move from {} to {}",
-                            old.to_string_lossy(),
-                            new.to_string_lossy()
-                        );
-                        Ok(())
-                    }
-                })?;
+                // TODO handle renames
+                info!(
+                    "noticed rename from {} to {}",
+                    path_relative_to_current_dir(old.as_ref()).to_string_lossy(),
+                    path_relative_to_current_dir(new.as_ref()).to_string_lossy(),
+                );
+                warn!("justsql watch currently can not handle file renames. re-run justsql watch to keep up to date.")
             }
             _ => {}
         },
@@ -228,13 +196,21 @@ fn listen_event(
                 let mut guard = collection
                     .lock()
                     .map_err(|_| EventError::AbortError(mutex_lock_error))?;
-                let file_name = path.to_string_lossy().to_string();
-                match guard.upsert(path.clone()) {
-                    Err(err) => Err(EventError::ModuleCollectionError(file_name, err))?,
-                    Ok(_) => {
-                        let path = path_relative_to_current_dir(path);
-                        info!("noticed change in {}", path.to_string_lossy());
+
+                let (modules, errors) = guard.import_module(path.as_path());
+
+                guard.transaction::<_, ModuleCollectionError, _>(|collection| {
+                    for (loc, module) in modules {
+                        collection.upsert(loc, module)?;
                     }
+                    Ok(())
+                })?;
+
+                if errors.len() != 0 {
+                    Err(EventError::PartialImportError(errors))?
+                } else {
+                    let path = path_relative_to_current_dir(path.as_path());
+                    info!("noticed change in {}", path.to_string_lossy());
                 }
             }
             _ => {}
@@ -247,13 +223,19 @@ fn listen_event(
                     let mut guard = collection
                         .lock()
                         .map_err(|_| EventError::AbortError(mutex_lock_error))?;
-                    let file_name = path.to_string_lossy().to_string();
-                    match guard.upsert(path.clone()) {
-                        Err(err) => Err(EventError::ModuleCollectionError(file_name, err))?,
-                        Ok(_) => {
-                            let path = path_relative_to_current_dir(path);
-                            info!("noticed change in {}", path.to_string_lossy());
+                    let (modules, errors) = guard.import_module(path.as_path());
+                    guard.transaction::<_, ModuleCollectionError, _>(|collection| {
+                        for (loc, module) in modules {
+                            collection.upsert(loc, module)?;
                         }
+                        Ok(())
+                    })?;
+
+                    if errors.len() != 0 {
+                        Err(EventError::PartialImportError(errors))?
+                    } else {
+                        let path = path_relative_to_current_dir(path.as_path());
+                        info!("noticed change in {}", path.to_string_lossy());
                     }
                 }
                 _ => {}

@@ -1,4 +1,3 @@
-mod as_needed;
 mod file_type;
 mod importer;
 pub mod module_collection;

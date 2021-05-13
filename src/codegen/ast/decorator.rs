@@ -1,5 +1,4 @@
-use std::path::{Path, PathBuf};
-
+use std::path::Path;
 use either::Either;
 use nom::{
     branch::alt,

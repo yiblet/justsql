@@ -66,6 +66,7 @@ impl Command for Print {
                                 anyhow!("failed to find parameter {}", param.as_str())
                             }))
                         }
+                        // FIXME add printing for callsite bindings
                         _ => todo!(),
                     })
                     .enumerate()

@@ -4,7 +4,7 @@ use std::collections::BTreeSet;
 /// returns None if the graph contains a cycle
 pub fn topological_sort<'a, T: Ord + 'a, I: Iterator<Item = &'a (T, T)>>(
     iter: I,
-) -> Result<Vec<&'a T>, BTreeSet<&'a T>> {
+) -> (Vec<&'a T>, Option<BTreeSet<&'a T>>) {
     let mut parent_of_relations = BTreeSet::new();
     let mut child_of_relations = BTreeSet::new();
     let mut all_nodes = BTreeSet::new();
@@ -33,7 +33,7 @@ pub fn topological_sort<'a, T: Ord + 'a, I: Iterator<Item = &'a (T, T)>>(
     if min.is_none() {
         // the degenerate case
         // only happens if the input iter is empty
-        return Ok(vec![]);
+        return (vec![], None);
     }
 
     let min = min.unwrap(); // we can ensure min is Some
@@ -90,9 +90,9 @@ pub fn topological_sort<'a, T: Ord + 'a, I: Iterator<Item = &'a (T, T)>>(
                     .flat_map(|(v1, v2)| vec![v1, v2].into_iter()),
             )
             .collect();
-        Err(cycle)
+        return (res, Some(cycle));
     } else {
-        Ok(res) // the topological ordering.
+        return (res, None);
     }
 }
 
@@ -104,38 +104,38 @@ mod tests {
     fn topological_sort_no_cycle_test() {
         let val = [(1, 2), (2, 3)].iter();
         let res = topological_sort(val);
-        assert_eq!(res, Ok(vec![&3, &2, &1]));
+        assert_eq!(res.0, (vec![&3, &2, &1]));
 
         let val = [(1, 2), (2, 3)].iter();
         let res = topological_sort(val);
-        assert_eq!(res, Ok(vec![&3, &2, &1]));
+        assert_eq!(res.0, (vec![&3, &2, &1]));
 
         let val = [(1, 2), (4, 3), (2, 3)].iter();
         let res = topological_sort(val);
-        assert_eq!(res, Ok(vec![&3, &4, &2, &1]));
+        assert_eq!(res.0, (vec![&3, &4, &2, &1]));
 
         // directed diamond
         let val = [(1, 2), (5, 1), (5, 4), (4, 3), (2, 3)].iter();
         let res = topological_sort(val);
-        assert_eq!(res, Ok(vec![&3, &4, &2, &1, &5]));
+        assert_eq!(res.0, (vec![&3, &4, &2, &1, &5]));
 
         let val = [(1, 2), (5, 1), (5, 4), (4, 3), (2, 3)].iter();
         let res = topological_sort(val);
-        assert_eq!(res, Ok(vec![&3, &4, &2, &1, &5]));
+        assert_eq!(res.0, (vec![&3, &4, &2, &1, &5]));
     }
 
     #[test]
     fn topological_sort_cycle_test() {
         let val = [(1, 2), (2, 1)].iter();
         let res = topological_sort(val);
-        assert_eq!(res, Err([1, 2].iter().collect()));
+        assert_eq!(res.1, Some([1, 2].iter().collect()));
 
         let val = [(1, 2), (2, 1), (2, 3)].iter();
         let res = topological_sort(val);
-        assert_eq!(res, Err([1, 2].iter().collect()));
+        assert_eq!(res.1, Some([1, 2].iter().collect()));
 
         let val = [(1, 2), (2, 3), (3, 1), (3, 4)].iter();
         let res = topological_sort(val);
-        assert_eq!(res, Err([1, 2, 3].iter().collect()));
+        assert_eq!(res.1, Some([1, 2, 3].iter().collect()));
     }
 }

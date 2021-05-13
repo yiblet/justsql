@@ -44,19 +44,17 @@ fn create_evaluator(directory: &str, extension: &str, watch: bool) -> anyhow::Re
         let importer = WatchingImporter::new(directory, extension)?;
         Ok(Evaluator::with_importer(importer))
     } else {
-        let (importer, errors) = UpfrontImporter::new(directory, extension)?;
-        if errors.len() != 0 {
-            let mut buffer = String::new();
-            let plural = if errors.len() > 1 { "s" } else { "" };
-            eprint!("errors in the following file{}: \n", plural);
-            for (file_name, error) in errors {
-                error.print_error(&mut buffer, file_name.as_str())?;
-                eprint!("{}\n", buffer);
-                buffer.clear();
+        match UpfrontImporter::new(directory, extension) {
+            Err(errors) => {
+                let mut buffer = String::new();
+                for error in errors {
+                    error.print_error(&mut buffer)?;
+                    eprint!("{}\n", buffer);
+                    buffer.clear();
+                }
+                return Err(anyhow!("failed to import some sql files"));
             }
-            return Err(anyhow!("failed to import some sql files"));
-        } else {
-            Ok(Evaluator::with_importer(importer))
+            Ok(importer) => Ok(Evaluator::with_importer(importer)),
         }
     }
 }

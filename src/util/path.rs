@@ -43,9 +43,9 @@ pub fn path_relative_from(path: &Path, base: &Path) -> Option<PathBuf> {
     }
 }
 
-pub fn path_relative_to_current_dir(path: PathBuf) -> PathBuf {
+pub fn path_relative_to_current_dir(path: &Path) -> PathBuf {
     std::env::current_dir()
         .ok()
         .and_then(|current_dir| path_relative_from(path.as_ref(), current_dir.as_ref()))
-        .unwrap_or_else(|| path)
+        .unwrap_or_else(|| path.to_path_buf())
 }

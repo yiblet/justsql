@@ -134,6 +134,24 @@ impl WatchingInternals {
                         }
                         Err(err) => warn!("display error when reporting issues: {}", err),
                     },
+                    EventError::PartialImportError(errs) => match errs
+                        .into_iter()
+                        .map(|err| {
+                            err.print_error(&mut buf).map(|_| {
+                                buf.push_str("\n");
+                            })
+                        })
+                        .collect::<Result<(), _>>()
+                    {
+                        Ok(_) => {
+                            error!("could not apply change due to error:\n\n{}", buf);
+                            buf.clear();
+                        }
+                        Err(err) => {
+                            warn!("display error when reporting issues: {}", err);
+                            buf.clear();
+                        }
+                    },
                     _ => warn!("failure while watching files {}", err),
                 }
             }

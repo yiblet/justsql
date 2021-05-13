@@ -16,6 +16,7 @@ pub struct SpanRef<'a, A> {
 
 impl<'a, A> SpanRef<'a, A> {
     /// the str containing the value
+    #[allow(dead_code)]
     pub fn value_str(&self) -> &'a str {
         &self.start[0..self.start.len() - self.end.len()]
     }

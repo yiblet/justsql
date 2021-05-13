@@ -43,10 +43,10 @@ impl FrontMatter {
         check_reserved_words(iter)
     }
 
-    pub fn new<'a, P: Borrow<Path> + Ord>(
+    pub fn new<'a, P: Borrow<Path> + Ord, M: Borrow<Module>>(
         location: PathBuf,
         mut decorators: Vec<SpanRef<'a, Decorator<'a>>>,
-        modules: &BTreeMap<P, Module>,
+        modules: &BTreeMap<P, M>,
     ) -> CResult<'a, Self> {
         // checking logic:
         //     1. all imports must not have conflicting names
@@ -105,7 +105,7 @@ impl FrontMatter {
 
                     let module = match modules.get(location.as_path()) {
                         Some(module) => {
-                            if !module.is_single_statement() {
+                            if !module.borrow().is_single_statement() {
                                 errors.push(ParseError::IrErrorKind(
                                     file.start,
                                     IrErrorKind::ConstError("Can not import sql file that is more than a single statement. Reduce this file to a single select, insert, delete or update statement."),
@@ -118,7 +118,13 @@ impl FrontMatter {
                         None => continue,
                     };
 
-                    let params = module.front_matter.params.iter().cloned().collect();
+                    let params = module
+                        .borrow()
+                        .front_matter
+                        .params
+                        .iter()
+                        .cloned()
+                        .collect();
 
                     import_map.insert(name.to_string(), (location, params));
                 }
@@ -156,7 +162,7 @@ impl FrontMatter {
 
         if auth_settings.is_none() {
             errors.extend(deps.iter().filter_map(|dep| {
-                if dep.front_matter.auth_settings.is_some() {
+                if dep.value.borrow().front_matter.auth_settings.is_some() {
                     Some(ParseError::const_error(
                         dep.start,
                         "import requires auth but this module is does not check for auth. Add an '@auth validate' decorator.",

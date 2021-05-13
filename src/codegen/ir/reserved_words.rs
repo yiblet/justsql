@@ -1,5 +1,5 @@
 use crate::codegen::{
-    result::{CResult, IrErrorKind, ParseError},
+    result::{IrErrorKind, ParseError},
     span_ref::SpanRef,
 };
 

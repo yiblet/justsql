@@ -18,7 +18,6 @@ use std::{
     collections::{BTreeMap, BTreeSet},
     fmt::Write,
     path::{Path, PathBuf},
-    pin::Pin,
 };
 use thiserror::Error;
 
@@ -289,9 +288,10 @@ impl Module {
         Ok(file_content)
     }
 
-    fn gen_file_contents<'a>(
+    fn gen_file_contents<'a, M>(
         errors: &mut Vec<ModuleError>,
         paths: &[&'a Path],
+        deps: Option<&BTreeMap<&'a Path, M>>,
     ) -> BTreeMap<PathBuf, String> {
         let mut file_contents = BTreeMap::new();
         let mut imports = BTreeSet::new();
@@ -312,7 +312,11 @@ impl Module {
                     if let Some((_, decorators)) = Decorators::parse(file_content.as_str()).ok() {
                         let new_deps = decorators
                             .canonicalized_dependencies(path.as_path())
-                            .map(|span_ref| span_ref.value);
+                            .map(|span_ref| span_ref.value)
+                            .filter(|path| {
+                                // filter out dependencies that shouldn't be imported
+                                deps.map_or(true, |deps| !deps.contains_key(path.as_path()))
+                            });
                         paths.extend(new_deps);
                     }
                     file_contents.insert(path, file_content);
@@ -349,44 +353,54 @@ impl Module {
     }
 
     // paths should all be canonical paths
+    // TODO create an interner for paths and file_contents so that we can use references through out the build process.
+    // TODO split module parsing to it's own builder pattern-style struct
     // note this can return more paths than you put in
     pub fn from_paths<'a, M: Borrow<Module>>(
         paths: &[&'a Path],
         deps: Option<&BTreeMap<&'a Path, M>>,
     ) -> (BTreeMap<PathBuf, Module>, Vec<ModuleError>) {
+        let mut modules: BTreeMap<PathBuf, MixedRef<Module>> = BTreeMap::new();
         let mut errors = vec![];
 
-        let file_contents = Self::gen_file_contents(&mut errors, paths);
+        debug!("number of paths: {}", paths.len());
+        // all imported file contents are exactly the file_contents that are in paths or their
+        // (dependencies - deps) excluding files that we failed to import.
+        let file_contents = Self::gen_file_contents(&mut errors, paths, deps.clone());
+        debug!("number of files read: {}", file_contents.len());
+        // asts contain exactly all asts that should be imported excluding those that errored out
         let mut asts = Self::gen_asts(&mut errors, &file_contents);
+        debug!("number of ASTs parsed: {}", asts.len());
 
         // finally topologically sort by ast and complete the rest in topological order
         // currently asts maintain the order that paths came in from the argument
-        let edges: Vec<(PathBuf, PathBuf)> = asts
-            .iter()
-            .flat_map(|(path, ast)| {
-                ast.canonicalized_dependencies()
-                    .filter_map(move |path_buf| Some((path.to_path_buf(), path_buf.value)))
-            })
-            .collect();
+        let mut nodes: BTreeSet<PathBuf> = asts.keys().cloned().collect();
+        let mut edges: Vec<(PathBuf, PathBuf)> = vec![];
+        for (path, ast) in asts.iter() {
+            for dep in ast.canonicalized_dependencies() {
+                if !nodes.contains(&dep.value) {
+                    nodes.insert(dep.value.clone());
+                }
+                edges.push((path.clone(), dep.value))
+            }
+        }
 
-        let (sorted, sorting_errors) = topological_sort(edges.iter());
+        let (sorted, sorting_errors) = topological_sort(nodes.iter(), edges.iter());
         if let Some(set) = sorting_errors {
             errors.push(ModuleError::CyclicDependency(
                 set.into_iter().map(|v| v.to_path_buf()).collect(),
             ));
         };
 
-        let mut modules: BTreeMap<PathBuf, MixedRef<Module>> = BTreeMap::new();
         modules.extend(deps.iter().flat_map(|map| {
             map.iter()
                 .map(|(key, value)| (key.to_path_buf(), MixedRef::Borrowed(value.borrow())))
         }));
 
-        let mut errors: Vec<ModuleError> = vec![];
-
         for (path, contents, ast) in sorted
             .into_iter()
             .map(PathBuf::as_path)
+            // filters out paths that are dependencies but do not need to be imported
             .filter_map(|path| Some((path, file_contents.get(path)?.as_str(), asts.remove(path)?)))
         {
             match Module::new(ast, &modules)
@@ -406,9 +420,15 @@ impl Module {
                 MixedRef::Borrowed(_) => None,
                 MixedRef::Owned(v) => Some((path, v)),
             })
-            .collect();
+            .collect::<BTreeMap<_, _>>();
 
         drop(file_contents);
+
+        debug!(
+            "imported {} new modules, with {} errors",
+            new_modules.len(),
+            errors.len()
+        );
         (new_modules, errors)
     }
 

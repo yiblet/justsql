@@ -13,6 +13,11 @@ pub struct UpfrontImporter(ModuleCollection);
 impl UpfrontImporter {
     pub fn new(directory: &str, extension: &str) -> Result<Self, Vec<ModuleCollectionError>> {
         let (collection, errors) = ModuleCollection::from_directory(directory, extension, false);
+        info!(
+            "endpoints: {}, modules: {}",
+            collection.endpoints.len(),
+            collection.locations.len()
+        );
         if errors.len() != 0 {
             Err(errors)
         } else {

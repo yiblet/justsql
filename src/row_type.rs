@@ -178,7 +178,7 @@ fn convert_value(value_ref: PgValueRef) -> anyhow::Result<RowType> {
         "VARCHAR[]" => RowType::Varchar(Array(try_get(value_ref)?)),
         "\"CHAR\"" => RowType::Char(Value(try_get(value_ref)?)),
         "\"CHAR\"[]" => RowType::Char(Value(try_get(value_ref)?)),
-        // TODO: 
+        // TODO:
         // "BIT" => {},
         // "BOX" => {},
         // "CIDR" => {},

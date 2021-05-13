@@ -98,6 +98,7 @@ impl ModuleCollection {
         let paths: Vec<&Path> = path_bufs.iter().map(|p| p.borrow()).collect();
 
         let (modules, module_errors) = Module::from_paths::<Module>(paths.as_slice(), None);
+        debug!("number of modules imported: {}", modules.len());
         errors.extend(module_errors.into_iter().map(ModuleCollectionError::from));
         for (path, module) in modules {
             if let Err(err) = collection.insert(path.to_path_buf(), module) {

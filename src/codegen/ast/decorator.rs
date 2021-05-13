@@ -263,6 +263,10 @@ mod tests {
         assert!(Decorator::parse_import(test_str).is_err());
     }
 
+    fn parse_decorators(input: &str) -> PResult<Vec<SpanRef<'_, Decorator<'_>>>> {
+        Decorators::parse.map(|v| v.0).parse(input)
+    }
+
     #[test]
     fn parse_decorators_test() {
         fn unwrap<'a>(vec: Vec<SpanRef<'a, Decorator<'a>>>) -> Vec<Decorator<'a>> {

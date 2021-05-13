@@ -1,5 +1,5 @@
 use super::{
-    decorator::{Decorator, Decorators},
+    decorator::Decorators,
     sql::{parse_statements, StatementSpan},
 };
 use crate::codegen::{
@@ -41,13 +41,19 @@ impl<'a> Ast<'a> {
         let file_loc = self.file_loc.as_path();
         self.decorators.canonicalized_dependencies(file_loc)
     }
+
+    #[allow(dead_code)]
+    pub fn dependencies(&self) -> impl Iterator<Item = SpanRef<'a, PathBuf>> + '_ {
+        let file_loc = self.file_loc.as_path();
+        self.decorators.dependencies(file_loc)
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use std::path::Path;
 
-    use crate::codegen::ast::InterpSpan;
+    use crate::codegen::ast::{Decorator, InterpSpan};
 
     use super::*;
 

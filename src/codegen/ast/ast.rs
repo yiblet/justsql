@@ -1,5 +1,5 @@
 use super::{
-    decorator::{parse_decorators, Decorator},
+    decorator::{Decorator, Decorators},
     sql::{parse_statements, StatementSpan},
 };
 use crate::codegen::{
@@ -13,13 +13,13 @@ use std::path::PathBuf;
 #[derive(Debug, Clone)]
 pub struct Ast<'a> {
     pub file_loc: PathBuf,
-    pub decorators: Vec<SpanRef<'a, Decorator<'a>>>,
+    pub decorators: Decorators<'a>,
     pub statements: Vec<SpanRef<'a, StatementSpan<'a>>>,
 }
 
 impl<'a> Ast<'a> {
     pub fn parse(file_loc: PathBuf, input: &'a str) -> PResult<'a, Self> {
-        let (input, decorators) = parse_decorators(input)?;
+        let (input, decorators) = Decorators::parse(input)?;
         let (input, statements) = parse_statements(input)?;
         let (input, _) = eof(input).map_err(|_: nom::Err<ParseError>| {
             nom::Err::Failure(ParseError::error_kind(
@@ -38,24 +38,8 @@ impl<'a> Ast<'a> {
     }
 
     pub fn canonicalized_dependencies(&self) -> impl Iterator<Item = SpanRef<'a, PathBuf>> + '_ {
-        self.dependencies()
-            .filter_map(|dep| dep.with(dep.canonicalize()).transpose().ok())
-    }
-
-    pub fn dependencies(&self) -> impl Iterator<Item = SpanRef<'a, PathBuf>> + '_ {
         let file_loc = self.file_loc.as_path();
-        self.decorators
-            .iter()
-            .filter_map(move |decorator| match &decorator.value {
-                Decorator::Import(_, path) => path
-                    .map(|path| {
-                        let mut cur_loc = file_loc.to_path_buf();
-                        cur_loc.push(path);
-                        Some(cur_loc)
-                    })
-                    .transpose(),
-                _ => None,
-            })
+        self.decorators.canonicalized_dependencies(file_loc)
     }
 }
 

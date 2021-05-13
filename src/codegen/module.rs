@@ -1,5 +1,5 @@
 use super::{
-    ast::Ast,
+    ast::{Ast, Decorators},
     ir::{FrontMatter, Interp, Statements},
     result::{CResult, ParseError},
 };
@@ -235,7 +235,7 @@ impl Module {
             statements,
         } = ast;
 
-        let front_matter = FrontMatter::new(file_loc, decorators, modules)?;
+        let front_matter = FrontMatter::new(file_loc, decorators.into_inner(), modules)?;
         let statements = Statements::new(&front_matter, statements)?;
         Ok(Self {
             front_matter,
@@ -269,34 +269,58 @@ impl Module {
         })
     }
 
+    fn read_file<'a>(path: &'a Path) -> Result<String, ModuleError> {
+        use std::io::prelude::*;
+        let mut file = match std::fs::File::open(path) {
+            Ok(file) => file,
+            Err(err) => Err(ModuleError::SingleModuleError(
+                path.to_path_buf(),
+                SingleModuleError::IOError(err),
+            ))?,
+        };
+        let mut file_content = String::new();
+        if let Err(err) = file.read_to_string(&mut file_content) {
+            Err(ModuleError::SingleModuleError(
+                path.to_path_buf(),
+                SingleModuleError::IOError(err),
+            ))?;
+        }
+
+        Ok(file_content)
+    }
+
     fn gen_file_contents<'a>(
         errors: &mut Vec<ModuleError>,
-        paths: &'a [PathBuf],
-    ) -> BTreeMap<&'a Path, String> {
-        use std::io::prelude::*;
+        paths: &[&'a Path],
+    ) -> BTreeMap<PathBuf, String> {
         let mut file_contents = BTreeMap::new();
-        for path in paths.iter() {
-            let mut file = match std::fs::File::open(path) {
-                Ok(file) => file,
-                Err(err) => {
-                    errors.push(ModuleError::SingleModuleError(
-                        path.to_path_buf(),
-                        SingleModuleError::IOError(err),
-                    ));
-                    continue;
-                }
-            };
-            let mut file_content = String::new();
+        let mut imports = BTreeSet::new();
+        let mut paths = paths
+            .into_iter()
+            .cloned()
+            .map(Path::to_path_buf)
+            .collect::<Vec<_>>();
 
-            if let Err(err) = file.read_to_string(&mut file_content) {
-                errors.push(ModuleError::SingleModuleError(
-                    path.to_path_buf(),
-                    SingleModuleError::IOError(err),
-                ));
+        while let Some(path) = paths.pop() {
+            if imports.contains(path.as_path()) {
                 continue;
             }
+            imports.insert(path.clone());
 
-            file_contents.insert(path.as_path(), file_content);
+            match Self::read_file(path.as_path()) {
+                Ok(file_content) => {
+                    if let Some((_, decorators)) = Decorators::parse(file_content.as_str()).ok() {
+                        let new_deps = decorators
+                            .canonicalized_dependencies(path.as_path())
+                            .map(|span_ref| span_ref.value);
+                        paths.extend(new_deps);
+                    }
+                    file_contents.insert(path, file_content);
+                }
+                Err(err) => {
+                    errors.push(err);
+                }
+            };
         }
 
         file_contents
@@ -304,40 +328,24 @@ impl Module {
 
     pub fn gen_asts<'b>(
         errors: &mut Vec<ModuleError>,
-        deps: &BTreeSet<PathBuf>,
-        paths: &[PathBuf],
-        file_contents: &'b BTreeMap<PathBuf, Pin<Box<String>>>,
-    ) -> (BTreeMap<PathBuf, Ast<'b>>, BTreeSet<PathBuf>, Vec<PathBuf>) {
-        let mut failed_imports = BTreeSet::new();
-        let asts: BTreeMap<PathBuf, Ast<'b>> = paths
+        file_contents: &'b BTreeMap<PathBuf, String>,
+    ) -> BTreeMap<PathBuf, Ast<'b>> {
+        let asts: BTreeMap<PathBuf, Ast<'b>> = file_contents
             .iter()
-            .cloned()
-            .filter_map(|path| {
+            .filter_map(|(path, contents)| {
                 // filter out the things that failed in the previous pass
-                let contents: &'b str = file_contents.get(path.as_path())?.as_str();
-                let ast_res = Ast::parse(path.to_path_buf(), contents).map(|v| v.1);
+                let ast_res = Ast::parse(path.clone(), contents).map(|v| v.1);
                 match ast_res {
-                    Ok(v) => Some((path, v)),
+                    Ok(v) => Some((path.clone(), v)),
                     Err(err) => {
-                        failed_imports.insert(path.clone());
-                        errors.push(ModuleError::with_nom_error(path, contents, err));
+                        errors.push(ModuleError::with_nom_error(path.clone(), contents, err));
                         None
                     }
                 }
             })
             .collect();
 
-        let unimported_paths = asts
-            .values()
-            .flat_map(|ast| ast.canonicalized_dependencies())
-            .map(|span_ref| span_ref.value)
-            .filter(|path| {
-                let path = path.as_path();
-                !(asts.contains_key(path) || deps.contains(path) || failed_imports.contains(path))
-            })
-            .collect();
-
-        (asts, failed_imports, unimported_paths)
+        asts
     }
 
     // paths should all be canonical paths
@@ -348,42 +356,8 @@ impl Module {
     ) -> (BTreeMap<PathBuf, Module>, Vec<ModuleError>) {
         let mut errors = vec![];
 
-        let mut file_contents = BTreeMap::new();
-
-        let mut asts: BTreeMap<PathBuf, Ast> = BTreeMap::new();
-        let mut path_deps = deps
-            .iter()
-            .flat_map(|map| map.keys())
-            .cloned()
-            .map(Path::to_path_buf)
-            .collect();
-        let mut to_import: Vec<PathBuf> = paths.iter().cloned().map(Path::to_path_buf).collect();
-
-        // loop over asts to parse in case the ast list doesn't include all the things the module
-        // needs to import
-        while to_import.len() != 0 {
-            file_contents.extend(
-                Self::gen_file_contents(&mut errors, to_import.as_slice())
-                    .into_iter()
-                    .map(|(path, content)| (path.to_path_buf(), Box::pin(content))),
-            );
-            let (new_asts, failed_imports, next_imports) = Self::gen_asts(
-                &mut errors,
-                &path_deps,
-                to_import.as_slice(),
-                &file_contents,
-            );
-            path_deps.extend(new_asts.keys().cloned());
-            path_deps.extend(failed_imports);
-            // NOTE must ensure asts can only maintain references to the content of the string
-            asts.extend(new_asts.into_iter().map(|(path, ast)| {
-                (path, unsafe {
-                    // this is safe because asts only maintain references to the pinned string
-                    std::mem::transmute::<Ast<'_>, Ast<'static>>(ast)
-                })
-            }));
-            to_import = next_imports;
-        }
+        let file_contents = Self::gen_file_contents(&mut errors, paths);
+        let mut asts = Self::gen_asts(&mut errors, &file_contents);
 
         // finally topologically sort by ast and complete the rest in topological order
         // currently asts maintain the order that paths came in from the argument

@@ -1,4 +1,3 @@
-use std::path::Path;
 use either::Either;
 use nom::{
     branch::alt,
@@ -10,6 +9,7 @@ use nom::{
     sequence::{delimited, preceded},
     Parser,
 };
+use std::path::{Path, PathBuf};
 
 use crate::codegen::module::AuthSettings;
 
@@ -132,34 +132,77 @@ where
     )
 }
 
-// TODO do not permit decorators with stuff after that isn't a space
-pub fn parse_decorators<'a>(input: &'a str) -> PResult<Vec<SpanRef<'a, Decorator<'a>>>> {
-    let (input, decorators) = fold_many0(
-        delimited(
-            space,
-            alt((
-                with_multi_line_comment(SpanRef::<Decorator>::parse(Decorator::parse))
-                    .map(Either::Left),
-                with_single_line_comment(SpanRef::<Decorator>::parse(Decorator::parse))
-                    .map(Either::Right),
-            )),
-            space,
-        ),
-        vec![],
-        |mut acc, item| match item {
-            Either::Left(item) => {
-                acc.extend(item.into_iter());
-                acc
-            }
-            Either::Right(Some(item)) => {
-                acc.push(item);
-                acc
-            }
-            Either::Right(None) => acc,
-        },
-    )(input)?;
+#[derive(Debug, Clone)]
+pub struct Decorators<'a>(pub Vec<SpanRef<'a, Decorator<'a>>>);
 
-    Ok((input, decorators))
+impl<'a> std::ops::Deref for Decorators<'a> {
+    type Target = Vec<SpanRef<'a, Decorator<'a>>>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl<'a> Decorators<'a> {
+    pub fn into_inner(self) -> Vec<SpanRef<'a, Decorator<'a>>> {
+        self.0
+    }
+
+    pub fn canonicalized_dependencies<'b>(
+        &'b self,
+        file_loc: &'b Path,
+    ) -> impl Iterator<Item = SpanRef<'a, PathBuf>> + '_ {
+        self.dependencies(file_loc)
+            .filter_map(|dep| dep.with(dep.canonicalize()).transpose().ok())
+    }
+
+    pub fn dependencies<'b>(
+        &'b self,
+        file_loc: &'b Path,
+    ) -> impl Iterator<Item = SpanRef<'a, PathBuf>> + 'b {
+        self.0
+            .iter()
+            .filter_map(move |decorator| match &decorator.value {
+                Decorator::Import(_, path) => path
+                    .map(|path| {
+                        let mut cur_loc = file_loc.to_path_buf();
+                        cur_loc.push(path);
+                        Some(cur_loc)
+                    })
+                    .transpose(),
+                _ => None,
+            })
+    }
+
+    // TODO do not permit decorators with stuff after that isn't a space
+    pub fn parse(input: &'a str) -> PResult<Self> {
+        let (input, decorators) = fold_many0(
+            delimited(
+                space,
+                alt((
+                    with_multi_line_comment(SpanRef::<Decorator>::parse(Decorator::parse))
+                        .map(Either::Left),
+                    with_single_line_comment(SpanRef::<Decorator>::parse(Decorator::parse))
+                        .map(Either::Right),
+                )),
+                space,
+            ),
+            vec![],
+            |mut acc, item| match item {
+                Either::Left(item) => {
+                    acc.extend(item.into_iter());
+                    acc
+                }
+                Either::Right(Some(item)) => {
+                    acc.push(item);
+                    acc
+                }
+                Either::Right(None) => acc,
+            },
+        )(input)?;
+
+        Ok((input, Self(decorators)))
+    }
 }
 
 #[cfg(test)]

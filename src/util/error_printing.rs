@@ -2,7 +2,7 @@ use std::{error::Error, fmt::Write};
 use thiserror::Error;
 
 pub trait PrintableError: Error {
-    fn print_error<W: Write>(&self, writer: &mut W, file_name: &str) -> Result<(), PrintError>;
+    fn print_error<W: Write>(&self, writer: &mut W) -> Result<(), PrintError>;
 }
 
 #[derive(Error, Debug)]

@@ -90,6 +90,7 @@ impl FrontMatter {
                     };
 
                     let mut location = location.clone();
+                    location.pop();
                     location.push(file.value);
 
                     let location = match location.canonicalize() {

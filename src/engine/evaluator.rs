@@ -1,6 +1,6 @@
 use std::{collections::BTreeMap, sync::Arc};
 
-use crate::codegen::Module;
+use crate::{codegen::Module, query};
 
 use super::importer::Importer;
 
@@ -24,13 +24,13 @@ impl Evaluator {
         Ok(module)
     }
 
-    pub fn evaluate_endpoint<'a, A>(
-        &self,
+    pub fn evaluate_endpoint<'a, 'b: 'a, A>(
+        &'b self,
         endpoint: &str,
         bindings: &'a BTreeMap<String, A>,
         auth_bindings: Option<&'a BTreeMap<String, A>>,
     ) -> anyhow::Result<Vec<(String, Vec<&'a A>)>> {
         let module = self.importer.get_module_from_endpoint(endpoint)?;
-        module.evaluate(bindings, auth_bindings)
+        query::evaluate(&module, &self.importer, bindings, auth_bindings)
     }
 }

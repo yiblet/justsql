@@ -14,7 +14,7 @@ use std::{
 };
 use thiserror::Error;
 
-use super::file_type::FileType;
+use super::{file_type::FileType};
 
 #[derive(Error, Debug)]
 pub enum ModuleCollectionError {
@@ -60,6 +60,22 @@ impl PrintableError for ModuleCollectionError {
 }
 
 impl ModuleCollection {
+    pub fn from_paths(paths: &[&Path]) -> (Self, Vec<ModuleCollectionError>) {
+        let mut collection = Self::default();
+        let mut errors = vec![];
+
+        let (modules, module_errors) = Module::from_paths::<Module>(paths, None);
+        debug!("number of modules imported: {}", modules.len());
+        errors.extend(module_errors.into_iter().map(ModuleCollectionError::from));
+        for (path, module) in modules {
+            if let Err(err) = collection.insert(path.to_path_buf(), module) {
+                errors.push(err)
+            }
+        }
+
+        (collection, errors)
+    }
+
     pub fn from_directory(
         directory: &str,
         extension: &str,

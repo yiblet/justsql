@@ -18,7 +18,7 @@ mod util;
 
 pub fn main() -> anyhow::Result<()> {
     env_logger::init_from_env(
-        env_logger::Env::new().default_filter_or("actix_web=info,actix_server=info,justsql=info"),
+        env_logger::Env::new().default_filter_or("actix_web=info,justsql=info"),
     );
 
     if let Some(path) = dotenv::dotenv().ok() {

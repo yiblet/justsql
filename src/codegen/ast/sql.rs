@@ -95,7 +95,7 @@ fn parse_token<'a>(input: &'a str) -> PResult<'a, Token<'a>> {
         let param = lex_at_word.map(Param);
         let call_site = lex_at_word
             .and(delimited(
-                tag("("),
+                tag("(").and(space),
                 terminated(
                     separated_list0(space.and(tag(",")).and(space), |input: &'a str| {
                         let (input, res) = SpanRef::parse(lex_word)(input)?;
@@ -103,7 +103,7 @@ fn parse_token<'a>(input: &'a str) -> PResult<'a, Token<'a>> {
                     }),
                     opt(space.and(tag(",")).and(space)),
                 ),
-                tag(")"),
+                space.and(tag(")")),
             ))
             .map(|(func, params): (&'a str, Vec<SpanRef<'a, &'a str>>)| CallSite(func, params));
         let string_literal = lex_string_literal.map(StringLiteral);

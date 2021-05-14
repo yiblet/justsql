@@ -166,6 +166,7 @@ impl<'a> Decorators<'a> {
                 Decorator::Import(_, path) => path
                     .map(|path| {
                         let mut cur_loc = file_loc.to_path_buf();
+                        cur_loc.pop();
                         cur_loc.push(path);
                         Some(cur_loc)
                     })

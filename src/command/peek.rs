@@ -1,5 +1,7 @@
+use std::path::Path;
+
 use super::{Command, Opts};
-use crate::codegen::Module;
+use crate::engine::{Importer, UpfrontImporter};
 use anyhow::Context;
 use clap::Clap;
 
@@ -23,7 +25,8 @@ pub struct Peek {
 
 impl Command for Peek {
     fn run_command(&self, _opt: &Opts) -> anyhow::Result<()> {
-        let module = Module::from_path(self.module.as_ref()).context("failed to find file")?;
+        let importer = UpfrontImporter::from_paths_or_print_error(&[self.module.as_ref()])
+            .ok_or_else(|| anyhow!("importing sql failed"))?;
 
         tokio::runtime::Builder::new_current_thread()
             .enable_all()
@@ -47,8 +50,12 @@ impl Command for Peek {
                     )
                     .await?;
 
+                let module = importer.get_module_from_location(
+                    Path::new(self.module.as_str()).canonicalize()?.as_path(),
+                )?;
                 let res = crate::query::run_query(
-                    &module,
+                    module.as_ref(),
+                    &importer,
                     &pool,
                     &bindings,
                     auth_bindings.as_ref(),

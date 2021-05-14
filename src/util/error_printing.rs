@@ -1,8 +1,24 @@
-use std::{error::Error, fmt::Write};
+use std::fmt::{Debug, Write};
 use thiserror::Error;
 
-pub trait PrintableError: Error {
+pub trait PrintableError {
     fn print_error<W: Write>(&self, writer: &mut W) -> Result<(), PrintError>;
+}
+
+impl<'a, T: PrintableError> PrintableError for &'a [T] {
+    fn print_error<W: Write>(&self, writer: &mut W) -> Result<(), PrintError> {
+        for v in self.iter() {
+            v.print_error(writer)?;
+            writer.write_str("\n")?;
+        }
+        Ok(())
+    }
+}
+
+impl<'a, T: PrintableError> PrintableError for &'a Vec<T> {
+    fn print_error<W: Write>(&self, writer: &mut W) -> Result<(), PrintError> {
+        self.as_slice().print_error(writer)
+    }
 }
 
 #[derive(Error, Debug)]

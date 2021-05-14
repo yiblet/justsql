@@ -16,7 +16,6 @@ use crate::{
 use std::{
     borrow::Borrow,
     collections::{BTreeMap, BTreeSet},
-    fmt::Write,
     path::{Path, PathBuf},
 };
 use thiserror::Error;
@@ -29,10 +28,10 @@ pub enum AuthSettings {
     RemoveToken,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Copy)]
-pub enum ParamType<'a> {
-    Auth(&'a str),
-    Param(&'a str),
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub enum ParamType {
+    Auth(String),
+    Param(String),
 }
 
 #[derive(Error, Debug)]
@@ -242,32 +241,6 @@ impl Module {
         })
     }
 
-    pub fn from_str(file_loc: PathBuf, input: &str) -> Result<Module, nom::Err<ParseError>> {
-        let (_, ast) = Ast::parse(file_loc, input)?;
-        Self::new(ast, &BTreeMap::<&Path, &Module>::new()).map_err(nom::Err::Failure)
-    }
-
-    /// FIXME this only works for single modules with no import statements
-    pub fn from_path<'a>(path: &'a Path) -> Result<Module, ModuleError> {
-        use std::io::prelude::*;
-        let mut file = std::fs::File::open(path)
-            .map_err(SingleModuleError::IOError)
-            .map_err(|single_module_error| {
-                ModuleError::SingleModuleError(path.to_path_buf(), single_module_error)
-            })?;
-        let mut file_content = String::new();
-        file.read_to_string(&mut file_content)
-            .map_err(SingleModuleError::IOError)
-            .map_err(|single_module_error| {
-                ModuleError::SingleModuleError(path.to_path_buf(), single_module_error)
-            })?;
-        // TODO file content needs to be copied twice
-        // figure out a way to handle this without a copy.
-        Self::from_str(path.to_path_buf(), file_content.as_str()).map_err(|err| {
-            ModuleError::with_nom_error(path.to_path_buf(), file_content.as_str().into(), err)
-        })
-    }
-
     fn read_file<'a>(path: &'a Path) -> Result<String, ModuleError> {
         use std::io::prelude::*;
         let mut file = match std::fs::File::open(path) {
@@ -430,71 +403,6 @@ impl Module {
             errors.len()
         );
         (new_modules, errors)
-    }
-
-    pub fn evaluate<'a, A>(
-        &self,
-        bindings: &'a BTreeMap<String, A>,
-        auth_bindings: Option<&'a BTreeMap<String, A>>,
-    ) -> anyhow::Result<Vec<(String, Vec<&'a A>)>> {
-        self.sql
-            .iter()
-            .map(|stmt| -> anyhow::Result<(String, Vec<&'a A>)> {
-                let (res, mapping) = Self::bind(stmt.iter())?;
-                let bindings: Vec<_> = mapping
-                    .into_iter()
-                    .map(|param| match param {
-                        ParamType::Param(param) => bindings
-                            .get(param)
-                            .ok_or_else(|| anyhow!("parameter {} does not exist", param)),
-                        ParamType::Auth(param) => auth_bindings
-                            .ok_or_else(|| anyhow!("must be authorized"))?
-                            .get(param)
-                            .ok_or_else(|| anyhow!("parameter {} does not exist", param)),
-                    })
-                    .collect::<anyhow::Result<_>>()?;
-                Ok((res, bindings))
-            })
-            .collect()
-    }
-
-    pub fn bind<'a, I: Iterator<Item = &'a Interp>>(
-        iter: I,
-    ) -> anyhow::Result<(String, Vec<ParamType<'a>>)> {
-        let mut params = vec![];
-        let mut mapping: BTreeMap<ParamType, usize> = BTreeMap::new();
-        let mut res = String::new();
-        for interp in iter {
-            match &interp {
-                Interp::Literal(lit) => write!(&mut res, "{}", lit.as_str())?,
-                Interp::AuthParam(param)
-                    if mapping.contains_key(&ParamType::Auth(param.as_str())) =>
-                {
-                    write!(&mut res, "${}", mapping[&ParamType::Auth(param.as_str())])?
-                }
-                Interp::AuthParam(param) => {
-                    let cur = mapping.len() + 1;
-                    let param = ParamType::Auth(param);
-                    mapping.insert(param, cur);
-                    params.push(param);
-                    write!(&mut res, "${}", cur)?
-                }
-                Interp::Param(param) if mapping.contains_key(&ParamType::Param(param.as_str())) => {
-                    write!(&mut res, "${}", mapping[&ParamType::Param(param.as_str())])?
-                }
-                Interp::Param(param) => {
-                    let cur = mapping.len() + 1;
-                    let param = ParamType::Param(param);
-                    mapping.insert(param, cur);
-                    params.push(param);
-                    write!(&mut res, "${}", cur)?
-                }
-
-                // FIXME add callsites
-                _ => todo!(),
-            }
-        }
-        Ok((res, params))
     }
 }
 

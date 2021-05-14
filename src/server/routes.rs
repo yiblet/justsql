@@ -205,6 +205,7 @@ pub async fn run_queries(
 
                 query::run_query(
                     module.as_ref(),
+                    &evaluator.importer,
                     pool,
                     &payload,
                     auth_bindings.as_ref(),

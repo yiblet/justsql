@@ -1,11 +1,11 @@
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, path::Path};
 
-use anyhow::Context;
 use clap::Clap;
 
 use crate::{
     binding::Binding,
-    codegen::{Interp, Module},
+    engine::{Importer, UpfrontImporter},
+    query,
 };
 
 use super::{read_json_or_json_file, Command, Opts};
@@ -27,7 +27,10 @@ pub struct Print {
 impl Command for Print {
     // TODO split up this function
     fn run_command(&self, _opt: &Opts) -> anyhow::Result<()> {
-        let module = Module::from_path(self.module.as_ref()).context("failed to find file")?;
+        let importer = UpfrontImporter::from_paths_or_print_error(&[self.module.as_ref()])
+            .ok_or_else(|| anyhow!("importing sql failed"))?;
+        let module = importer
+            .get_module_from_location(Path::new(self.module.as_str()).canonicalize()?.as_path())?;
 
         let payload = self
             .json
@@ -39,42 +42,26 @@ impl Command for Print {
             .auth
             .as_ref()
             .map(|payload| read_json_or_json_file::<BTreeMap<String, Binding>>(payload.as_str()))
-            .transpose()?
-            .unwrap_or_default();
+            .transpose()?;
 
         for (idx, statement) in module.sql.iter().enumerate() {
             println!("PREPARE query_{} AS", idx);
-            let (stmt, _) = Module::bind(statement.iter())?;
+            let (stmt, params) =
+                query::build_query_statement(&module, &importer, statement.as_slice())?;
             for lines in stmt.split('\n').filter(|line| line.trim() != "") {
                 println!("    {}", lines);
             }
             println!(";");
 
             if let Some(bindings) = payload.as_ref() {
+                let bound_params =
+                    query::bind_params(params.as_slice(), &bindings, auth_claims.as_ref())?;
                 print!("EXECUTE query_{}(", idx);
-                for (idx, arg) in statement
-                    .iter()
-                    .filter_map(|interp| match interp {
-                        Interp::Literal(_) => None,
-                        Interp::Param(param) => {
-                            Some(bindings.get(param.as_str()).ok_or_else(|| {
-                                anyhow!("failed to find parameter {}", param.as_str())
-                            }))
-                        }
-                        Interp::AuthParam(param) => {
-                            Some(auth_claims.get(param.as_str()).ok_or_else(|| {
-                                anyhow!("failed to find parameter {}", param.as_str())
-                            }))
-                        }
-                        // FIXME add printing for callsite bindings
-                        _ => todo!(),
-                    })
-                    .enumerate()
-                {
+                for (idx, arg) in bound_params.iter().cloned().enumerate() {
                     if idx == 0 {
-                        print!("{}", arg?.to_sql_string()?)
+                        print!("{}", arg.to_sql_string()?)
                     } else {
-                        print!(", {}", arg?.to_sql_string()?)
+                        print!(", {}", arg.to_sql_string()?)
                     }
                 }
                 println!(");");

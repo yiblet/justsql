@@ -38,17 +38,7 @@ impl Command for Peek {
                 let (bindings, auth_bindings) =
                     super::read_input(self.json.as_str(), self.auth.as_ref().map(String::as_str))?;
 
-                let pool = sqlx::postgres::PgPoolOptions::new()
-                    .max_connections(1)
-                    .connect(
-                        config
-                            .database
-                            .url
-                            .and_then(|v| Some(v.value()?.into_owned()))
-                            .ok_or_else(|| anyhow!("must have database url set in config"))?
-                            .as_str(),
-                    )
-                    .await?;
+                let pool = crate::server::init::connect_to_db(&config, Some(1)).await?;
 
                 let module = importer.get_module_from_location(
                     Path::new(self.module.as_str()).canonicalize()?.as_path(),

@@ -64,19 +64,8 @@ pub async fn run_server(cmd: Server) -> anyhow::Result<()> {
     let evaluator = create_evaluator(cmd.directory.as_str(), cmd.extension.as_str(), cmd.watch)?;
 
     let config = Config::read_config()?;
+    let pool = crate::server::init::connect_to_db(&config, None).await?;
     let config = Arc::new(config);
-
-    let pool = sqlx::postgres::PgPoolOptions::new()
-        .connect(
-            config
-                .database
-                .url
-                .as_ref()
-                .and_then(|v| v.value().map(|v| v.into_owned()))
-                .ok_or_else(|| anyhow!("must have database url set in config"))?
-                .as_str(),
-        )
-        .await?;
 
     for endpoint in evaluator.importer.get_all_endpoints()? {
         info!("using endpoint {}", endpoint)

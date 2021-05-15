@@ -1,14 +1,5 @@
 use either::Either;
-use nom::{
-    branch::alt,
-    bytes::complete::{tag, take_while},
-    character::complete::one_of,
-    combinator::opt,
-    multi::fold_many0,
-    number::complete::float,
-    sequence::{delimited, preceded},
-    Parser,
-};
+use nom::{Parser, branch::alt, bytes::complete::{tag, take_while}, character::complete::one_of, combinator::{cut, opt}, multi::fold_many0, number::complete::float, sequence::{delimited, preceded}};
 use std::path::{Path, PathBuf};
 
 use crate::codegen::module::AuthSettings;
@@ -127,7 +118,7 @@ where
             .and(tag("@"))
             .and(tag(decorator))
             .and(line_space1),
-        parser,
+        cut(parser),
         line_space0,
     )
 }
@@ -222,6 +213,12 @@ mod tests {
         assert_eq!(Decorator::parse_endpoint(test_str).unwrap().1, "getUsers");
 
         let test_str = "@auth verify \n\n";
+        assert_eq!(
+            Decorator::parse_auth(test_str).unwrap().1,
+            AuthSettings::VerifyToken(None)
+        );
+
+        let test_str = "@auth verify";
         assert_eq!(
             Decorator::parse_auth(test_str).unwrap().1,
             AuthSettings::VerifyToken(None)
@@ -331,5 +328,12 @@ select * from users;
 "#;
         let (_, decs) = parse_decorators(test_str).unwrap();
         assert_eq!(decs.len(), 3);
+
+        let test_str = r#"
+-- @auth vxerify
+-- @param users
+select * from users;
+"#;
+        assert!(parse_decorators(test_str).is_err());
     }
 }

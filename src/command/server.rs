@@ -71,6 +71,8 @@ pub async fn run_server(cmd: Server) -> anyhow::Result<()> {
         info!("using endpoint {}", endpoint)
     }
 
+    let listen_loc = format!("0.0.0.0:{}", cmd.port);
+    info!("server listening on {}", listen_loc);
     HttpServer::new(move || {
         App::new()
             .wrap(middleware::Logger::default())
@@ -81,7 +83,7 @@ pub async fn run_server(cmd: Server) -> anyhow::Result<()> {
             .route("/api/v1/auth", web::post().to(routes::auth_query))
             .route("/api/v1/query", web::post().to(routes::run_queries))
     })
-    .bind(format!("0.0.0.0:{}", cmd.port))?
+    .bind(listen_loc)?
     .run()
     .await?;
 

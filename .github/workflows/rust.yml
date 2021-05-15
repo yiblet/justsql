@@ -23,6 +23,6 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             /target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          key: ${{ runner.os }}-cargo-${{ hashFiles('Cargo.lock') }}
       - run: cargo check --verbose 
       - run: cargo test --verbose

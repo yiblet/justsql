@@ -223,6 +223,7 @@ impl Module {
         self.sql.len() == 1
     }
 
+    #[allow(dead_code)]
     pub fn from_str<'a>(path: PathBuf, data: &'a str) -> CResult<'a, Self> {
         let (_, ast) = Ast::parse(path, data).map_err(|err| match err {
             nom::Err::Incomplete(_) => ParseError::const_error(data, "incomplete"),

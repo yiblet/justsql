@@ -95,11 +95,11 @@ impl<'a> Decorator<'a> {
     }
 
     fn parse_auth(input: &'a str) -> PResult<AuthSettings> {
-        let verify_token = preceded(tag("verify").and(space), opt(parse_interval))
+        let verify_token = preceded(tag("verify"), opt(preceded(line_space0, parse_interval)))
             .map(|opt| opt.map(|val| val as u64))
             .map(AuthSettings::VerifyToken);
 
-        let set_token = preceded(tag("authorize").and(space), parse_interval)
+        let set_token = preceded(tag("authorize").and(line_space1), parse_interval)
             .map(|val| val as u64)
             .map(AuthSettings::SetToken);
 
@@ -322,5 +322,14 @@ select * from users;
             nom::Err::Failure(ParseError::NomError(v, _)) => v.starts_with("users\n"),
             _ => panic!("{}", err),
         });
+
+        let test_str = r#"
+-- @auth verify
+-- @auth verify 2d
+-- @param users
+select * from users;
+"#;
+        let (_, decs) = parse_decorators(test_str).unwrap();
+        assert_eq!(decs.len(), 3);
     }
 }

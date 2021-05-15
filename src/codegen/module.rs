@@ -223,6 +223,15 @@ impl Module {
         self.sql.len() == 1
     }
 
+    pub fn from_str<'a>(path: PathBuf, data: &'a str) -> CResult<'a, Self> {
+        let (_, ast) = Ast::parse(path, data).map_err(|err| match err {
+            nom::Err::Incomplete(_) => ParseError::const_error(data, "incomplete"),
+            nom::Err::Error(err) => err,
+            nom::Err::Failure(err) => err,
+        })?;
+        Ok(Self::new::<&Path, Module>(ast, &BTreeMap::new())?)
+    }
+
     pub fn new<'a, P: Borrow<Path> + Ord, M: Borrow<Module>>(
         ast: Ast<'a>,
         modules: &BTreeMap<P, M>,
@@ -435,7 +444,7 @@ OR 0 = @id"#;
         assert_eq!(
             format!("{:?}", &err)
             ,
-            "Failure(Multiple([ErrorKind(\"@id \\nAND @email = \\\'testing 123 @haha\\\' \\nOR 0 = @id\", UndefinedParameterError(\"id\")), ErrorKind(\"@id\", UndefinedParameterError(\"id\"))]))"
+            "Multiple([ErrorKind(\"@id \\nAND @email = \\\'testing 123 @haha\\\' \\nOR 0 = @id\", UndefinedParameterError(\"id\")), ErrorKind(\"@id\", UndefinedParameterError(\"id\"))])"
         );
 
         let test_str = r#"

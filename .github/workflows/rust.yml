@@ -2,10 +2,12 @@ name: Rust CI
 
 on:
   push:
-    paths:
-      - src/**
-      - Cargo.toml
-      - Cargo.lock
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+env:
+  CARGO_TERM_COLOR: always
 
 jobs:
   test:
@@ -22,5 +24,5 @@ jobs:
             ~/.cargo/git
             /target
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-      - run: cargo check
-      - run: cargo test
+      - run: cargo check --verbose 
+      - run: cargo test --verbose

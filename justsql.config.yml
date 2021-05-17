@@ -19,3 +19,9 @@ auth:
 cookie:
   secure: true
   http_only: true
+
+cors:
+  allowed_origins:
+    # useful for dev development
+    - from_env: $CORS_ORIGIN
+      default: "http://localhost:2332"

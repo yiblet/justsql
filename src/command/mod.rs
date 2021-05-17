@@ -33,6 +33,11 @@ pub fn read_json_or_json_file<T: DeserializeOwned>(data: &str) -> anyhow::Result
 #[derive(Clap)]
 #[clap(version = "0.2.0", author = "Shalom Yiblet <shalom.yiblet@gmail.com>")]
 pub struct Opts {
+    /// Set the file path where justsql will read the configs from. If this is left unset,
+    /// justsql will recursively look for a `justsql.config.yaml` in current and parent
+    /// directories.
+    #[clap(short, long)]
+    config: Option<std::path::PathBuf>,
     #[clap(subcommand)]
     subcmd: SubCommand,
 }

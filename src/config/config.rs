@@ -14,12 +14,35 @@ pub struct Config {
     pub auth: Option<Secret>,
     #[serde(default)]
     pub cookie: Cookie,
+    #[serde(default)]
+    pub cors: Cors,
 }
 
 #[derive(Serialize, Deserialize, Default)]
 pub struct Database {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub url: Option<EnvValue<String>>,
+}
+
+#[derive(Serialize, Deserialize, Default)]
+pub struct Cors {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub allowed_origins: Option<Vec<EnvValue<String>>>,
+}
+
+impl Cors {
+    pub fn cors(&self) -> actix_cors::Cors {
+        let mut cors = actix_cors::Cors::default();
+        for origin in self
+            .allowed_origins
+            .iter()
+            .flat_map(|vec| vec.iter())
+            .filter_map(|val| val.value())
+        {
+            cors = cors.allowed_origin(origin.as_ref().as_str());
+        }
+        cors
+    }
 }
 
 #[derive(Serialize, Deserialize)]

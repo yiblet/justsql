@@ -34,7 +34,7 @@ pub struct Server {
 impl Command for Server {
     fn run_command(&self, opt: &Opts) -> anyhow::Result<()> {
         let clone = self.clone();
-        actix_rt::System::new().block_on(run_server(opt.config.as_ref(), clone))?;
+        actix_rt::System::new("server").block_on(run_server(opt.config.clone(), clone))?;
         Ok(())
     }
 }
@@ -59,7 +59,7 @@ fn create_evaluator(directory: &str, extension: &str, watch: bool) -> anyhow::Re
     }
 }
 
-pub async fn run_server(config_path: Option<&PathBuf>, cmd: Server) -> anyhow::Result<()> {
+pub async fn run_server(config_path: Option<PathBuf>, cmd: Server) -> anyhow::Result<()> {
     // import all files
     let evaluator = create_evaluator(cmd.directory.as_str(), cmd.extension.as_str(), cmd.watch)?;
 
@@ -77,6 +77,7 @@ pub async fn run_server(config_path: Option<&PathBuf>, cmd: Server) -> anyhow::R
         App::new()
             .wrap(middleware::Logger::default())
             .wrap(middleware::Compress::default())
+            .wrap(config.cors.cors())
             .data(config.clone())
             .data(pool.clone())
             .data(evaluator.clone())

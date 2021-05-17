@@ -24,7 +24,7 @@ pub struct Run {
 }
 
 impl Command for Run {
-    fn run_command(&self, _opt: &Opts) -> anyhow::Result<()> {
+    fn run_command(&self, opt: &Opts) -> anyhow::Result<()> {
         let importer = UpfrontImporter::from_paths_or_print_error(&[self.module.as_ref()])
             .ok_or_else(|| anyhow!("importing sql failed"))?;
 
@@ -32,7 +32,7 @@ impl Command for Run {
             .enable_all()
             .build()?
             .block_on(async {
-                let config = crate::config::Config::read_config()
+                let config = crate::config::Config::read_config(opt.config.as_ref())
                     .context("config is needed to find postgres_url")?;
 
                 let (bindings, auth_bindings) =

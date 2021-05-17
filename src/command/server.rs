@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{path::PathBuf, sync::Arc};
 
 use actix_web::{middleware, web, App, HttpServer};
 use clap::Clap;
@@ -32,9 +32,9 @@ pub struct Server {
 }
 
 impl Command for Server {
-    fn run_command(&self, _opt: &Opts) -> anyhow::Result<()> {
+    fn run_command(&self, opt: &Opts) -> anyhow::Result<()> {
         let clone = self.clone();
-        actix_rt::System::new().block_on(run_server(clone))?;
+        actix_rt::System::new().block_on(run_server(opt.config.as_ref(), clone))?;
         Ok(())
     }
 }
@@ -59,11 +59,11 @@ fn create_evaluator(directory: &str, extension: &str, watch: bool) -> anyhow::Re
     }
 }
 
-pub async fn run_server(cmd: Server) -> anyhow::Result<()> {
+pub async fn run_server(config_path: Option<&PathBuf>, cmd: Server) -> anyhow::Result<()> {
     // import all files
     let evaluator = create_evaluator(cmd.directory.as_str(), cmd.extension.as_str(), cmd.watch)?;
 
-    let config = Config::read_config()?;
+    let config = Config::read_config(config_path)?;
     let pool = crate::server::init::connect_to_db(&config, None).await?;
     let config = Arc::new(config);
 

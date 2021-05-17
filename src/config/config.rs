@@ -32,7 +32,10 @@ pub struct Cors {
 
 impl Cors {
     pub fn cors(&self) -> actix_cors::Cors {
-        let mut cors = actix_cors::Cors::default();
+        let mut cors = actix_cors::Cors::default()
+            .allowed_methods(vec!["GET", "POST", "OPTIONS"])
+            .max_age(Some(600));
+
         for origin in self
             .allowed_origins
             .iter()

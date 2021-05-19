@@ -200,9 +200,8 @@ pub struct Module {
 }
 
 impl Module {
-
-    /// Gets the auth bindings from the secret config and parsed cookie. 
-    /// This will return error if the cookie fails to decode or if the auth setting 
+    /// Gets the auth bindings from the secret config and parsed cookie.
+    /// This will return error if the cookie fails to decode or if the auth setting
     /// is set to verify and no auth cookie was given.
     pub fn get_auth_bindings(
         &self,

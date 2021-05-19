@@ -14,7 +14,7 @@ use std::{
 };
 use thiserror::Error;
 
-use super::{file_type::FileType};
+use super::file_type::FileType;
 
 #[derive(Error, Debug)]
 pub enum ModuleCollectionError {

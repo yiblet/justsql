@@ -1,5 +1,14 @@
 use either::Either;
-use nom::{Parser, branch::alt, bytes::complete::{tag, take_while}, character::complete::one_of, combinator::{cut, opt}, multi::fold_many0, number::complete::float, sequence::{delimited, preceded}};
+use nom::{
+    branch::alt,
+    bytes::complete::{tag, take_while},
+    character::complete::one_of,
+    combinator::{cut, opt},
+    multi::fold_many0,
+    number::complete::float,
+    sequence::{delimited, preceded},
+    Parser,
+};
 use std::path::{Path, PathBuf};
 
 use crate::codegen::module::AuthSettings;

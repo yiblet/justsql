@@ -7,6 +7,9 @@ use serde::{Deserialize, Serialize};
 use super::{env_value::EnvValue, secret::Secret};
 
 // TODO add assume_null_if_missing field
+// *assume_null_if_missing field will allow users to pass
+// missing parameters that do not turn into an 400 error but instead
+// will pass things in as null.
 #[derive(Serialize, Deserialize)]
 pub struct Config {
     #[serde(default)]

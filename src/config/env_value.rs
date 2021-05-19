@@ -7,6 +7,7 @@ use serde::{de::DeserializeOwned, Deserialize, Serialize};
 pub enum EnvValue<T> {
     Value(T),
     Env {
+        #[serde(with = "from_env_serde")]
         from_env: String,
         #[serde(skip_serializing_if = "Option::is_none")]
         default: Option<T>,
@@ -47,14 +48,50 @@ impl<T: Default> Default for EnvValue<T> {
     }
 }
 
+mod from_env_serde {
+    use serde::{de, Deserialize, Deserializer, Serializer};
+
+    // serialize the secret key
+    pub fn serialize<S>(kind: &String, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str(format!("${}", kind).as_str())
+    }
+
+    pub fn deserialize<'de, D>(des: D) -> Result<String, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let value: String = Deserialize::deserialize(des)?;
+        if value.chars().next() != Some('$') {
+            Err(de::Error::custom("from_env value must start with '$'"))
+        } else {
+            value
+                .get(1..)
+                .ok_or_else(|| de::Error::custom("from_env value must start with '$'"))
+                .map(|val| val.to_string())
+        }
+    }
+} /* from_env_serde */
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::to_string;
+    use serde_json::{from_str, to_string};
 
     #[test]
     fn env_value_serde_test() {
         let val = EnvValue::Value(2);
-        assert_eq!(to_string(&val).unwrap(), r#"2"#)
+        assert_eq!(to_string(&val).unwrap(), r#"2"#);
+        let val = EnvValue::<()>::Env {
+            from_env: "test".to_string(),
+            default: None,
+        };
+        assert_eq!(to_string(&val).unwrap(), r#"{"from_env":"$test"}"#);
+        assert_eq!(
+            &val,
+            &from_str::<EnvValue<()>>(r#"{"from_env":"$test"}"#).unwrap()
+        )
     }
 }

@@ -200,21 +200,33 @@ pub struct Module {
 }
 
 impl Module {
-    pub fn verify(
+
+    /// Gets the auth bindings from the secret config and parsed cookie. 
+    /// This will return error if the cookie fails to decode or if the auth setting 
+    /// is set to verify and no auth cookie was given.
+    pub fn get_auth_bindings(
         &self,
         secret: Option<&Secret>,
         cookie: Option<&str>,
     ) -> anyhow::Result<Option<BTreeMap<String, Binding>>> {
+        let claim = secret
+            .and_then(|secret| {
+                secret
+                    .decode(cookie?)
+                    .map(|claim| Some(claim.claims))
+                    .transpose()
+            })
+            .transpose()?;
+
         if matches!(
             &self.front_matter.auth_settings,
             Some(AuthSettings::VerifyToken(_))
-        ) {
-            return secret
-                .ok_or_else(|| anyhow!("secret is needed to verify cookie auth"))?
-                .decode(cookie.ok_or_else(|| anyhow!("missing cookie"))?)
-                .map(|claim| Some(claim.claims));
+        ) && claim.is_none()
+        {
+            return Err(anyhow!("authentication is required"));
         }
-        Ok(None)
+
+        Ok(claim)
     }
 
     /// only modules that are single statements can be imported and reused inside
@@ -233,6 +245,7 @@ impl Module {
         Ok(Self::new::<&Path, Module>(ast, &BTreeMap::new())?)
     }
 
+    /// creates a new module given an ast and the map containing this modules dependencies
     pub fn new<'a, P: Borrow<Path> + Ord, M: Borrow<Module>>(
         ast: Ast<'a>,
         modules: &BTreeMap<P, M>,
@@ -251,6 +264,7 @@ impl Module {
         })
     }
 
+    /// helper function for reading a file
     fn read_file<'a>(path: &'a Path) -> Result<String, ModuleError> {
         use std::io::prelude::*;
         let mut file = match std::fs::File::open(path) {
@@ -271,6 +285,7 @@ impl Module {
         Ok(file_content)
     }
 
+    /// helper function for getting file content
     fn gen_file_contents<'a, M>(
         errors: &mut Vec<ModuleError>,
         paths: &[&'a Path],
@@ -313,6 +328,7 @@ impl Module {
         file_contents
     }
 
+    /// creates all asts that and appends to errors all asts that failed to get created
     pub fn gen_asts<'b>(
         errors: &mut Vec<ModuleError>,
         file_contents: &'b BTreeMap<PathBuf, String>,

@@ -67,7 +67,8 @@ pub async fn auth_query(
             .auth_settings
             .as_ref()
             .ok_or_else(|| anyhow!("module at endpoint {} does not have any auth settings"))?;
-        let auth_bindings = module.verify(
+
+        let auth_bindings = module.get_auth_bindings(
             config.auth.as_ref(),
             cookie.as_ref().map(|cookie| cookie.value()),
         )?;
@@ -76,7 +77,6 @@ pub async fn auth_query(
             evaluator.evaluate_endpoint(endpoint.as_str(), &payload, auth_bindings.as_ref())?;
         let queries = build_queries(&statements)?;
         let mut query: Option<sqlx::query::Query<Postgres, PgArguments>> = None;
-
         for cur in queries {
             if let Some(cur_query) = query {
                 cur_query.execute(&mut tx).await?;
@@ -221,7 +221,7 @@ pub async fn run_queries(
             .zip(payloads.into_iter())
             .map(|(endpoint, payload)| async move {
                 let module = evaluator.endpoint(endpoint.as_str())?;
-                let auth_bindings = module.verify(config_secret.as_ref(), cookie)?;
+                let auth_bindings = module.get_auth_bindings(config_secret.as_ref(), cookie)?;
 
                 query::run_query(
                     module.as_ref(),

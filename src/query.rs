@@ -42,7 +42,7 @@ pub fn bind_params<'a, 'b, A>(
                 .get(param.as_str())
                 .ok_or_else(|| anyhow!("parameter {} does not exist", param)),
             ParamType::Auth(param) => auth_bindings
-                .ok_or_else(|| anyhow!("must be authorized"))?
+                .ok_or_else(|| anyhow!("must have auth token"))?
                 .get(param.as_str())
                 .ok_or_else(|| anyhow!("parameter {} does not exist", param)),
         })

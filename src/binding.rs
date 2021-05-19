@@ -1,6 +1,7 @@
 use serde::Deserialize;
 use serde_json::Value;
 
+#[derive(Debug, PartialEq)]
 pub enum Binding {
     Int(i64),
     Float(f64),

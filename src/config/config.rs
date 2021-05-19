@@ -1,5 +1,6 @@
 use std::{borrow::Cow, env, fs::File, path::Path};
 
+use actix_web::http;
 use anyhow::Context;
 use serde::{Deserialize, Serialize};
 
@@ -33,7 +34,11 @@ pub struct Cors {
 impl Cors {
     pub fn cors(&self) -> actix_cors::Cors {
         let mut cors = actix_cors::Cors::default()
-            .allowed_methods(vec!["GET", "POST", "OPTIONS"])
+            .allowed_methods(vec![
+                http::Method::GET,
+                http::Method::POST,
+                http::Method::OPTIONS,
+            ])
             .max_age(Some(600));
 
         for origin in self
@@ -56,8 +61,8 @@ pub struct Cookie {
     pub http_only: EnvValue<bool>,
     #[serde(default = "true_env_value")]
     pub secure: EnvValue<bool>,
-    #[serde(default = "default_path")]
-    pub path: EnvValue<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub path: Option<EnvValue<String>>,
 }
 
 impl Cookie {
@@ -67,33 +72,39 @@ impl Cookie {
         V: Into<Cow<'c, str>>,
     {
         let mut builder = actix_web::cookie::Cookie::build(name, value);
-
-        let domain_opt = self.domain.as_ref().and_then(|v| v.value());
-        if let Some(domain) = domain_opt {
+        if let Some(domain) = self.domain() {
             builder = builder.domain(domain.into_owned())
+        }
+        if let Some(path) = self.path() {
+            builder = builder.path(path.into_owned())
         }
 
         let cookie = builder
-            .path(
-                self.path
-                    .value()
-                    .map_or_else(|| "/".to_string(), |v| v.into_owned()),
-            )
-            .secure(
-                self.http_only
-                    .value()
-                    .as_ref()
-                    .map_or(true, |v| *v.as_ref()),
-            )
-            .http_only(
-                self.http_only
-                    .value()
-                    .as_ref()
-                    .map_or(true, |v| *v.as_ref()),
-            )
+            .secure(self.secure())
+            .http_only(self.http_only())
             .finish();
 
         cookie
+    }
+
+    pub fn domain(&self) -> Option<Cow<String>> {
+        self.domain.as_ref().and_then(|env_value| env_value.value())
+    }
+
+    pub fn path(&self) -> Option<Cow<String>> {
+        self.path.as_ref().and_then(|env_value| env_value.value())
+    }
+
+    pub fn secure(&self) -> bool {
+        // by default leave insecure for users who do not use https
+        self.secure.value().as_ref().map_or(false, |v| *v.as_ref())
+    }
+
+    pub fn http_only(&self) -> bool {
+        self.http_only
+            .value()
+            .as_ref()
+            .map_or(true, |v| *v.as_ref())
     }
 }
 
@@ -101,17 +112,13 @@ fn true_env_value() -> EnvValue<bool> {
     EnvValue::Value(true)
 }
 
-fn default_path() -> EnvValue<String> {
-    EnvValue::Value("/".to_string())
-}
-
 impl Default for Cookie {
     fn default() -> Self {
         Cookie {
             domain: None,
-            http_only: true_env_value(),
-            secure: true_env_value(),
-            path: default_path(),
+            http_only: EnvValue::Value(true),
+            secure: EnvValue::Value(false),
+            path: None,
         }
     }
 }

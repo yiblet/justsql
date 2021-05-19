@@ -23,5 +23,6 @@ pub async fn connect_to_db(
                 .as_str(),
         )
         .await?;
+    info!("succesfully connected to the database");
     Ok(pool)
 }

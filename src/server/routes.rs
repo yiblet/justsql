@@ -139,8 +139,28 @@ pub async fn auth_query(
             },
         }),
         Ok(value) => match (value, req.cookie(COOKIE_NAME)) {
-            (ReturnType::RemoveToken, Some(c)) => {
-                HttpResponse::Ok().del_cookie(&c).json(QueryResult {
+            (ReturnType::RemoveToken, Some(mut cookie)) => {
+                // wipes out the cookie the old-fashioned way.
+
+                let path_opt = config.cookie.path();
+                match path_opt.as_ref() {
+                    None => cookie.unset_path(),
+                    Some(path) => cookie.set_path(path.as_str()),
+                }
+
+                let domain_opt = config.cookie.domain();
+                match domain_opt.as_ref() {
+                    None => cookie.unset_domain(),
+                    Some(domain) => cookie.set_domain(domain.as_str()),
+                }
+
+                cookie.set_value("");
+                cookie.set_max_age(None);
+                cookie.set_expires(Some(time::OffsetDateTime::unix_epoch()));
+                cookie.set_http_only(config.cookie.http_only());
+                cookie.set_secure(config.cookie.secure());
+
+                HttpResponse::Ok().cookie(cookie).json(QueryResult {
                     endpoint,
                     data: QueryStatus::Success {
                         data: "Cookie is deleted.",

@@ -42,6 +42,8 @@ impl Cors {
                 http::Method::POST,
                 http::Method::OPTIONS,
             ])
+            .supports_credentials()
+            .allowed_headers(vec![http::header::CONTENT_TYPE])
             .max_age(Some(600));
 
         for origin in self

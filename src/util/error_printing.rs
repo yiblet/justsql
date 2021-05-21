@@ -207,10 +207,10 @@ limit 1
         assert_eq!(
             format!("\n{}", res.as_str()),
             r#"
- --> src/text.sql:3:0
+ --> src/text.sql:2:20
   |
-3 | where userId = @userId
-  |^unexpected token
+2 | select * from users 
+  |                    ^unexpected token
 "#
         )
     }

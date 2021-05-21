@@ -60,14 +60,15 @@ pub fn print_unpositioned_error<W: Write>(
     Ok(())
 }
 
-pub fn print_error<W: Write>(
-    writer: &mut W,
-    file: &str,
-    position: usize,
-    explanation: &str,
-    file_name: &str,
-) -> Result<(), PrintError> {
-    let (row, col, _) = file
+struct Position {
+    row: usize,
+    col: usize,
+    idx: usize,
+}
+
+/// find the row and column of a file given a character position
+fn find_row_col(file: &str, position: usize) -> Result<Position, PrintError> {
+    let iter = file
         .char_indices()
         .scan((1usize, 0usize), |pos, (idx, chr)| {
             if chr == '\n' {
@@ -75,10 +76,49 @@ pub fn print_error<W: Write>(
                 pos.1 = idx;
             };
             Some((pos.0, idx - pos.1, idx))
-        })
-        .skip_while(|(_, _, idx)| *idx < position)
-        .next()
-        .ok_or_else(|| PrintError::MissingPositionError)?;
+        });
+
+    let mut prev = None;
+    let mut data = None;
+    for (row, col, idx) in iter {
+        prev = data.take();
+        data = Some((row, col, idx));
+        if idx == position {
+            break;
+        }
+    }
+
+    // NOTE this fixes a bug where we get MissingPositionError and
+    // MissingLineErrors if an error occurs at EOF
+    // if we're at a new line then point to the character of
+    // the previous line
+    if matches!(data, Some((_, 0, _))) && prev.is_some() {
+        data = prev
+    }
+
+    data.map(|(row, col, idx)| Position { row, col, idx })
+        .ok_or_else(|| PrintError::MissingPositionError)
+}
+
+pub fn print_error<W: Write>(
+    writer: &mut W,
+    file: &str,
+    position: usize,
+    explanation: &str,
+    file_name: &str,
+) -> Result<(), PrintError> {
+    debug!(
+        "finding error in file {} at position {}",
+        file_name, position
+    );
+
+    // we shadow position here since find_row_col will sometimes
+    // go back a line if the current position is at the line beginning.
+    let Position {
+        row,
+        col,
+        idx: position,
+    } = find_row_col(file, position)?;
 
     let line = file
         .get(position - col + 1..)
@@ -166,5 +206,38 @@ limit 1
   |^unexpected token
 "#
         )
+    }
+
+    #[test]
+    fn row_position_test() {
+        fn assert_row_position(data: &str) {
+            let mut prev;
+            let mut cur = None;
+            for (idx, _) in data.char_indices() {
+                prev = cur.take();
+                cur = find_row_col(data, idx).ok().map(|pos| (pos.row, pos.col));
+                assert!(cur.is_some());
+                if prev.is_some() {
+                    assert!(prev <= cur)
+                }
+            }
+        }
+
+        assert_row_position(
+            r#"-- @endpoint update_data
+-- @param test
+select * from users
+where id = user.id
+"#,
+        );
+
+        assert_row_position(
+            r#"--"#,
+        );
+
+        assert_row_position(
+            r#"select * from users
+testing 123"#,
+        );
     }
 }

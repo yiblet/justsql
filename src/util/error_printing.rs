@@ -111,6 +111,13 @@ pub fn print_error<W: Write>(
         "finding error in file {} at position {}",
         file_name, position
     );
+    if file.len() == 0 {
+        return print_unpositioned_error(
+            writer,
+            format!("empty file: {}", explanation).as_str(),
+            file_name,
+        );
+    }
 
     // we shadow position here since find_row_col will sometimes
     // go back a line if the current position is at the line beginning.
@@ -231,9 +238,7 @@ where id = user.id
 "#,
         );
 
-        assert_row_position(
-            r#"--"#,
-        );
+        assert_row_position(r#"--"#);
 
         assert_row_position(
             r#"select * from users

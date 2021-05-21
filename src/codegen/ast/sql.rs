@@ -199,7 +199,7 @@ fn parse_sql_statement<'a>(input: &'a str) -> PResult<'a, StatementSpan<'a>> {
             .map_err(|err: nom::Err<ParseError>| {
                 err.map(|err| match err {
                     ParseError::NomError(input, nom::error::ErrorKind::Many1) => {
-                        ParseError::const_error(input, "statement(s) are empty")
+                        ParseError::const_error(input, "must have at least one sql statement")
                     }
                     _ => err,
                 })

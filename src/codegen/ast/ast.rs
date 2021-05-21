@@ -141,7 +141,7 @@ select * from test"#;
 ; ; ;"#;
         assert_eq!(
             Ast::parse(path.clone(), test_str).unwrap_err().to_string(),
-            "Parsing Error: ErrorKind(\"; ; ;\", ConstError(\"statement(s) are empty\"))"
+            "Parsing Error: ErrorKind(\"; ; ;\", ConstError(\"must have at least one sql statement\"))"
         );
     }
 }

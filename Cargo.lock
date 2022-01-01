@@ -1235,7 +1235,7 @@ dependencies = [
  "sqlx",
  "thiserror",
  "time 0.2.26",
- "tokio 1.5.0",
+ "tokio 1.15.0",
  "uuid",
  "walkdir",
 ]
@@ -2423,11 +2423,10 @@ dependencies = [
 
 [[package]]
 name = "tokio"
-version = "1.5.0"
+version = "1.15.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "83f0c8e7c0addab50b663055baf787d0af7f413a46e6e7fb9559a4e4db7137a5"
+checksum = "fbbf1c778ec206785635ce8ad57fe52b3009ae9e0c9f574a728f3049d3e55838"
 dependencies = [
- "autocfg",
  "pin-project-lite 0.2.6",
 ]
 
